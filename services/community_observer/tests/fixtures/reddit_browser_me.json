@@ -1,0 +1,9 @@
+{
+  "_nagrano": "2026-09-04T00:43Z przez czytnik kapsuły (reader.py) i reddit_browser_probe; Chrome for Testing 153 w trybie INTERACTIVE (headful, Xtigervnc). SESJA ZALOGOWANA — konto założone przez założyciela dla agenta (w profilu kapsuły ciasteczko reddit_session). Ciało PRZYCIĘTE przy nagrywaniu do pól, których dotyka parser: pełny obiekt t2 miał 4032 B preferencji i flag; usunięto loid, features, pref_*, liczniki skrzynki i wszystko, co nie służy rozpoznaniu sesji. Tokenów ani e-maila odpowiedź nie zawierała.",
+  "url": "https://www.reddit.com/api/me.json?raw_json=1",
+  "status": 200,
+  "final_url": "https://www.reddit.com/api/me.json?raw_json=1",
+  "content_type": "application/json; charset=UTF-8",
+  "body_length_original": 4032,
+  "body": "{\"kind\": \"t2\", \"data\": {\"name\": \"Demo_Maintainer\", \"id\": \"demoid0001\", \"created_utc\": 1788000000.0, \"is_suspended\": false, \"has_verified_email\": true, \"password_set\": true, \"link_karma\": 1, \"comment_karma\": 0, \"is_employee\": false, \"is_mod\": false}, \"loid\": \"<usunięto przy nagrywaniu>\", \"loid_created\": 1788000000000}"
+}

@@ -1,0 +1,27 @@
+[project]
+name = "wenext-browser-supervisor"
+version = "0.1.0"
+description = "BrowserSupervisor i CDP feature contract — E1.F0"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = [
+    "community-os-contracts",
+    "playwright==1.62.0",
+    # `vncpasswd.py` derives the VNC password file with it; the capsule image installs the same
+    # pin (infra/capsule/Dockerfile). Undeclared until 2026-09-04 — `uv run … pytest` failed at
+    # collection while the pre-built `.venv` happened to have it.
+    "cryptography>=45",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["browser_supervisor"]
+
+[tool.uv.sources]
+community-os-contracts = { workspace = true }

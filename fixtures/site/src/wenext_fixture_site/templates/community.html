@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}{{ community.name }} — {{ site_name }}{% endblock %}
+{% block page_id %}community{% endblock %}
+{% block content %}
+<h1>{{ community.name }}</h1>
+<p class="lead">{{ community.description }}</p>
+<form class="membership" method="post" action="/c/{{ community.slug }}/membership" data-testid="membership">
+  {% if member %}
+    <p class="badge" data-testid="membership-state">Jesteś członkiem</p>
+    <input type="hidden" name="leave" value="1">
+    <button type="submit" data-testid="leave-community">Opuść społeczność</button>
+  {% else %}
+    <p class="meta" data-testid="membership-state">Nie należysz do tej społeczności</p>
+    <button type="submit" data-testid="join-community">Dołącz</button>
+  {% endif %}
+</form>
+<nav class="tabs" data-testid="feed-tabs">
+  <a href="/c/{{ community.slug }}?sort=new" class="{{ 'active' if sort != 'rising' }}">Nowe</a>
+  <a href="/c/{{ community.slug }}?sort=rising" class="{{ 'active' if sort == 'rising' }}">Rosnące</a>
+</nav>
+<ol class="thread-list" data-testid="thread-list">
+  {% for t in threads %}
+    <li class="thread-row" data-thread-id="{{ t.id }}" data-window-state="{{ t.window_state }}">
+      <div class="votes {{ 'negative' if t.votes < 0 }}">{{ t.votes }}</div>
+      <div class="row-body">
+        <h2><a href="{{ t.path }}">{{ t.title }}</a></h2>
+        <p class="meta">
+          {{ t.author }} · {{ t.created_at|ago }} ·
+          {{ t.metrics.reply_count }} odpowiedzi ·
+          {{ t.metrics.unique_participants }} rozmówców ·
+          {{ t.metrics.depth_levels }} poziomów
+        </p>
+        <p class="badges">
+          {% if t.locked %}<span class="badge negative">zablokowany</span>{% endif %}
+          {% if t.removed_by_moderation %}<span class="badge negative">usunięty przez moderację</span>{% endif %}
+          {% if t.amplifications %}<span class="badge">podany dalej ×{{ t.amplifications|length }}</span>{% endif %}
+          <span class="badge">{{ t.window_state }}</span>
+        </p>
+      </div>
+    </li>
+  {% endfor %}
+</ol>
+{% endblock %}

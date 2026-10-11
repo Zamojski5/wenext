@@ -1,0 +1,580 @@
+# Kontrole threat modelu E1.F0 w formie maszynowo czytelnej.
+#
+# Ten plik jest wejściem do `tools/gonogo` i do `docs/threat-model/test_controls.py`.
+# Reguła, którą test egzekwuje: KAŻDA ścieżka w `enforced_by` i w `test` musi istnieć
+# na dysku. Nieistniejąca ścieżka to kontrola udawana, a udawana kontrola jest gorsza
+# niż jawny jej brak.
+#
+# `status`:
+#   EGZEKWOWANE — jest kod albo schemat, który tego pilnuje, ORAZ jest test, który to sprawdza
+#   CZESCIOWO   — jest kod, konfiguracja albo zamrożone kryterium bramki, ale nie ma testu
+#                 automatycznego; `uwagi` mówią, czego brakuje
+#   PLANOWANE   — nic tego jeszcze nie egzekwuje; `enforced_by` jest puste, `faza` mówi kiedy
+#
+# `zrodlo_w_dokumencie` to numer linii w ROADMAP_CODEX_CDP_COMMUNITY_OS.md.
+
+wersja: 1
+zamrozone_dnia: "2026-08-30"
+faza: E1.F0
+dokument: ROADMAP_CODEX_CDP_COMMUNITY_OS.md
+
+granice:
+  GR-1: "strona zewnętrzna → kapsuła (treść jest niezaufanym inputem)"
+  GR-2: "kapsuła → proces przeglądarki i profil (build, sandbox, port CDP, cookies)"
+  GR-3: "kapsuła ↔ Control Plane (lease, fencing, stan sesji)"
+  GR-4: "operator ↔ Control Plane (approval, InteractionLease, stream)"
+  GR-5: "granica produktu z sekcji 4 (czego nie robimy w ogóle)"
+
+kontrole:
+
+  # ---------------------------------------------------------------------------
+  # GR-1 — treść stron zewnętrznych i runtime modelu
+  # ---------------------------------------------------------------------------
+  - id: C-01
+    granica: GR-1
+    opis: >-
+      Treść stron zewnętrznych jest niezaufanym inputem. Runtime Codeksa nie widzi bazy,
+      sekretów, profili Chromium ani Docker socket i nie ma trasy do sieci kapsuły.
+    zrodlo_w_dokumencie: 3950
+    status: CZESCIOWO
+    enforced_by:
+      - docker-compose.yml
+    test: []
+    uwagi: >-
+      Serwis `codex` nie ma wolumenu `profiles`, nie ma DATABASE_URL ani POSTGRES_*, nie ma
+      montażu /var/run/docker.sock i jest wyłącznie w `edgenet` (bez `capsulenet`). Testu
+      automatycznego nie ma, bo `services/codex_runtime/` jeszcze nie istnieje (D12).
+
+  - id: C-02
+    granica: GR-1
+    opis: >-
+      Runtime modelu nie ma shella ani niekontrolowanego exec; nie może wywołać
+      `thread/shellCommand`, `command/exec` ani metod process/config/import/write.
+    zrodlo_w_dokumencie: 2222
+    status: CZESCIOWO
+    enforced_by:
+      - tools/gonogo/criteria.yaml
+    test: []
+    uwagi: >-
+      Kontrola `brak_shell_i_exec` jest zamrożona jako wymagana w GATE-3, więc bez dowodu
+      bramka nie może dostać GO. Samego egzekwowania w runtimie jeszcze nie ma (D12, D13).
+
+  - id: C-03
+    granica: GR-1
+    opis: >-
+      Model nie zatwierdza własnego proposala. Zgoda jest osobnym obiektem z `approved_by`
+      i wskazuje dokładny payload hash; bez niej `authorize_side_effect` rzuca PermissionError.
+    zrodlo_w_dokumencie: 3958
+    status: EGZEKWOWANE
+    enforced_by:
+      - contracts/src/community_os_contracts/execution.py
+    test:
+      - contracts/tests/test_invariants.py
+    uwagi: >-
+      Testy `test_action_without_approval_cannot_run` i `test_action_without_intent_cannot_run`.
+
+  - id: C-04
+    granica: GR-1
+    opis: >-
+      Model dostaje wyłącznie task-scoped, read-only MCP i nie może rozszerzyć allowlisty.
+      Granicy bezpieczeństwa nie opieramy na eksperymentalnym `dynamicTools`.
+    zrodlo_w_dokumencie: 2500
+    status: CZESCIOWO
+    enforced_by:
+      - tools/gonogo/criteria.yaml
+      - docker-compose.yml
+    test: []
+    uwagi: >-
+      Kontrola `tylko_dozwolony_mcp` jest wymagana w GATE-3; sidecar `mcp-sidecar` jest
+      w profilu `manual` i startowany per turn. Katalog `services/mcp_sidecar/` nie istnieje (D11).
+
+  - id: C-05
+    granica: GR-1
+    opis: >-
+      Model nie wykonuje surowych zapisujących `click`/`fill`/`press`. Akcje zapisujące
+      idą wyłącznie przez deterministyczny Action Adapter po approvalu.
+    zrodlo_w_dokumencie: 3956
+    status: PLANOWANE
+    faza: E1.F5
+    enforced_by: []
+    test: []
+    uwagi: >-
+      Action Adapter nie istnieje w F0. W F0 istnieje tylko brama typu (C-03, C-18):
+      adapter, gdy powstanie, musi wołać `authorize_side_effect` przed każdym side effectem.
+
+  - id: C-06
+    granica: GR-1
+    opis: >-
+      eTLD+1 służy wyłącznie do klasyfikacji, nigdy do autoryzacji. Granicą uprawnień
+      jest exact origin albo jawny zbiór hostów.
+    zrodlo_w_dokumencie: 3935
+    status: PLANOWANE
+    faza: E1.F2
+    enforced_by: []
+    test: []
+    uwagi: >-
+      URL policy i egress proxy nie powstają w F0. Fixture site działa po HTTP wewnątrz
+      `capsulenet` jako jawny wyjątek testowy z L3936.
+
+  - id: C-07
+    granica: GR-1
+    opis: >-
+      Routing przeglądarki jest defense-in-depth; nadrzędna jest polityka egress runnera.
+      Sieć kapsuły jest `internal: true`, czyli nie ma NAT-u ani trasy do świata.
+    zrodlo_w_dokumencie: 3946
+    status: CZESCIOWO
+    enforced_by:
+      - docker-compose.yml
+    test: []
+    uwagi: >-
+      Egress proxy z L3943 (prywatne i metadata IP po DNS resolution, rebinding) jest F2.
+      W F0 granicą jest sama sieć Dockera.
+
+  # ---------------------------------------------------------------------------
+  # GR-2 — proces przeglądarki, build i profil
+  # ---------------------------------------------------------------------------
+  - id: C-08
+    granica: GR-2
+    opis: >-
+      `--no-sandbox` jest zakazany, tak samo jak flagi maskujące automatyzację
+      (`--disable-blink-features=AutomationControlled`), `--disable-web-security`,
+      `--proxy-server` i `--headless=old`. Lista jest zamknięta i sprawdzana przy budowie
+      argumentów, nie w code review.
+    zrodlo_w_dokumencie: 3925
+    status: EGZEKWOWANE
+    enforced_by:
+      - services/browser_supervisor/browser_supervisor/args.py
+    test:
+      - services/browser_supervisor/tests/test_args_and_profile.py
+    uwagi: >-
+      `FORBIDDEN_FLAGS` + `ForbiddenFlag`; testy `test_forbidden_flag_is_rejected`
+      i `test_no_canonical_argument_is_forbidden`.
+
+  - id: C-09
+    granica: GR-2
+    opis: >-
+      Proces przeglądarki działa jako użytkownik non-root z włączonym sandboxem Chromium,
+      `cap_drop: ALL`, `no-new-privileges` i profilem seccomp.
+    zrodlo_w_dokumencie: 3924
+    status: CZESCIOWO
+    enforced_by:
+      - infra/capsule/Dockerfile
+      - docker-compose.yml
+      - infra/browser/seccomp_profile.json
+    test: []
+    uwagi: >-
+      `USER pwuser` w Dockerfile; brak testu, który uruchamia kapsułę jako root i sprawdza
+      odmowę — to wymagałoby drugiego obrazu.
+
+  - id: C-10
+    granica: GR-2
+    opis: >-
+      CDP nasłuchuje na losowym porcie loopbacku. Port nie trafia do frontendu ani do
+      reverse proxy i nie odpowiada na adresie kontenera w sieci Dockera.
+    zrodlo_w_dokumencie: 3921
+    status: EGZEKWOWANE
+    enforced_by:
+      - services/browser_supervisor/browser_supervisor/args.py
+      - services/browser_supervisor/browser_supervisor/contract.py
+    test:
+      - services/browser_supervisor/tests/test_args_and_profile.py
+    uwagi: >-
+      `cdp_host` domyślnie 127.0.0.1, `cdp_port=0`; kontrola `brak_publicznego_cdp`
+      w GATE-1, wynik w `artifacts/gate1/cdp-contract.json`.
+
+  - id: C-11
+    granica: GR-2
+    opis: >-
+      Zakaz mieszania Chrome, Chrome for Testing, Chromium i headless shell na jednym
+      profilu. Profil pamięta build i platformę; inny build albo inna platforma to twardy błąd.
+      Downgrade profilu otwartego nowszą wersją jest zakazany.
+    zrodlo_w_dokumencie: 2308
+    status: EGZEKWOWANE
+    enforced_by:
+      - services/browser_supervisor/browser_supervisor/profile.py
+      - versions.lock.toml
+      - tools/dev/check_versions.py
+    test:
+      - services/browser_supervisor/tests/test_args_and_profile.py
+    uwagi: >-
+      `ProfileBuildMismatch`; testy `test_different_build_is_rejected`, `test_different_platform_is_rejected_too`,
+      `test_used_profile_without_marker_requires_human_decision`.
+
+  - id: C-12
+    granica: GR-2
+    opis: >-
+      Stale `DevToolsActivePort` po `kill -9` nie jest podstawą do dołączenia. Weryfikacja
+      jest trójstopniowa: żywy port, zgodne pole `Browser`, ten sam identyfikator WebSocketa.
+      Sam żywy port nie wystarcza, bo numer portu może przejąć inny proces.
+    zrodlo_w_dokumencie: 5159
+    status: EGZEKWOWANE
+    enforced_by:
+      - services/browser_supervisor/browser_supervisor/devtools_port.py
+    test:
+      - services/browser_supervisor/tests/test_devtools_port.py
+    uwagi: >-
+      Testy `test_stale_port_after_kill_9_is_rejected` i `test_port_taken_over_by_another_process_is_rejected`.
+
+  - id: C-13
+    granica: GR-2
+    opis: >-
+      Profile Chromium nie są montowane do procesu Codeksa. Wolumen `profiles` jest
+      montowany wyłącznie do kapsuły.
+    zrodlo_w_dokumencie: 3895
+    status: CZESCIOWO
+    enforced_by:
+      - docker-compose.yml
+    test: []
+    uwagi: >-
+      Brak testu, który by to sprawdzał z zewnątrz. Kandydat: test czytający `docker compose config`.
+
+  - id: C-14
+    granica: GR-2
+    opis: >-
+      Zakaz kopiowania cookies między profilami. Jeden profil na konto; dwa konta tej samej
+      platformy nigdy nie współdzielą procesu, `user-data-dir`, displayu ani streamu.
+      Domyślnym recovery po niezgodności builda jest reauth, nie przenoszenie cookies.
+    zrodlo_w_dokumencie: 246
+    status: EGZEKWOWANE
+    enforced_by:
+      - services/browser_supervisor/browser_supervisor/profile.py
+      - services/browser_supervisor/browser_supervisor/gate2.py
+      - db/migrations/0001_f0_kernel.sql
+      - contracts/src/community_os_contracts/scope.py
+    test:
+      - services/profile_lease/tests/test_lease_fencing.py
+    uwagi: >-
+      Partial unique na `browser_profiles` (test `test_one_non_retired_profile_per_account`);
+      kontrola `brak_kopiowania_cookies` w GATE-2, wynik w `artifacts/gate2/headful-handoff.json`.
+
+  - id: C-15
+    granica: GR-2
+    opis: "`acceptDownloads=false` domyślnie; clipboard dwukierunkowy, upload/download i druk wyłączone."
+    zrodlo_w_dokumencie: 3899
+    status: PLANOWANE
+    faza: E1.F2
+    enforced_by: []
+    test: []
+    uwagi: >-
+      Kontekst Playwrighta jest w F0 tworzony wyłącznie przez kontrakt CDP (D05) na potrzeby
+      bramki, bez trwałej polityki pobierania. Polityka wchodzi razem z Browser Gatewayem.
+
+  # ---------------------------------------------------------------------------
+  # GR-3 — lease, fencing, stan sesji
+  # ---------------------------------------------------------------------------
+  - id: C-16
+    granica: GR-3
+    opis: >-
+      Najwyżej jeden aktywny `ProfileLease` na profil; `generation` rośnie przy każdym
+      przejęciu, a stary fencing token jest odrzucany przy każdym wywołaniu.
+    zrodlo_w_dokumencie: 2379
+    status: EGZEKWOWANE
+    enforced_by:
+      - services/profile_lease/profile_lease/store.py
+      - db/migrations/0001_f0_kernel.sql
+      - contracts/src/community_os_contracts/browser.py
+    test:
+      - services/profile_lease/tests/test_lease_fencing.py
+      - contracts/tests/test_invariants.py
+    uwagi: >-
+      Testy `test_stale_fencing_token_is_rejected`, `test_concurrent_attempts_yield_one_lease`,
+      `test_guard_rejects_forged_token`. To jest wprost DoD F0 z L5178.
+
+  - id: C-17
+    granica: GR-3
+    opis: >-
+      Niepewne reconciliation przenosi profil do `QUARANTINED`. Profil w kwarantannie nie
+      daje się wydzierżawić; nie startujemy drugiej kapsuły równolegle.
+    zrodlo_w_dokumencie: 2379
+    status: EGZEKWOWANE
+    enforced_by:
+      - services/profile_lease/profile_lease/store.py
+      - db/migrations/0001_f0_kernel.sql
+    test:
+      - services/profile_lease/tests/test_lease_fencing.py
+    uwagi: >-
+      Testy `test_takeover_without_reconciliation_quarantines_profile`,
+      `test_release_without_confirmation_quarantines_profile`,
+      `test_quarantined_profile_cannot_be_leased`.
+
+  - id: C-18
+    granica: GR-3
+    opis: "Najwyżej jeden aktywny `InteractionLease` na `browser_session_id`; tylko on może wysyłać input."
+    zrodlo_w_dokumencie: 2415
+    status: EGZEKWOWANE
+    enforced_by:
+      - db/migrations/0001_f0_kernel.sql
+      - contracts/src/community_os_contracts/browser.py
+    test:
+      - services/profile_lease/tests/test_lease_fencing.py
+    uwagi: "Partial unique `interaction_leases_jeden_aktywny_na_sesje`."
+
+  - id: C-19
+    granica: GR-3
+    opis: >-
+      Sesja w trybie `HEADLESS` nie może mieć displayu, procesu display servera ani stream
+      gatewaya. Praca automatu nie uruchamia ścieżki interaktywnej nawet przez pomyłkę.
+    zrodlo_w_dokumencie: 5532
+    status: EGZEKWOWANE
+    enforced_by:
+      - db/migrations/0001_f0_kernel.sql
+      - contracts/src/community_os_contracts/browser.py
+    test:
+      - services/profile_lease/tests/test_lease_fencing.py
+      - contracts/tests/test_invariants.py
+    uwagi: "CHECK `headless_bez_displayu`; test `test_headless_session_cannot_have_display`."
+
+  - id: C-20
+    granica: GR-3
+    opis: >-
+      Lista powodów trybu `INTERACTIVE` jest zamknięta: FIRST_LOGIN, REAUTH, MFA, CHALLENGE,
+      HUMAN_TAKEOVER, IDENTITY_VERIFICATION. Powód spoza listy jest odrzucany.
+    zrodlo_w_dokumencie: 5161
+    status: EGZEKWOWANE
+    enforced_by:
+      - db/migrations/0001_f0_kernel.sql
+      - contracts/src/community_os_contracts/enums.py
+      - services/browser_supervisor/browser_supervisor/supervisor.py
+    test:
+      - contracts/tests/test_invariants.py
+    uwagi: >-
+      CHECK na `capsule_mode_transitions.reason`; test `test_e1_allows_exactly_five_interactive_reasons`;
+      kontrola `powod_spoza_listy_odrzucony` w GATE-2.
+
+  # ---------------------------------------------------------------------------
+  # GR-4 — approval, stream, człowiek przy ekranie
+  # ---------------------------------------------------------------------------
+  - id: C-21
+    granica: GR-4
+    opis: >-
+      Żaden zapisujący side effect nie omija `ExecutionIntent`. `authorize_side_effect` jest
+      jedyną drogą i sprawdza: stan APPROVED, nieprzeterminowany draft, zgodę pasującą do
+      dokładnego payload hasha, intent związany z tą rewizją, intent niezużyty i niewygasły.
+    zrodlo_w_dokumencie: 5217
+    status: EGZEKWOWANE
+    enforced_by:
+      - contracts/src/community_os_contracts/execution.py
+    test:
+      - contracts/tests/test_invariants.py
+    uwagi: "Testy `test_the_correct_path_passes`, `test_expired_draft_cannot_be_executed`."
+
+  - id: C-22
+    granica: GR-4
+    opis: >-
+      `adapter_version` jest jednym z dwunastu pól wejścia hasha approvala. Deploy nowej
+      wersji adaptera zmienia hash każdej oczekującej rewizji, więc UNIEWAŻNIA wszystkie
+      niezużyte zgody. To jest zamierzone: operator zgadzał się na akcję wykonaną konkretnym kodem.
+    zrodlo_w_dokumencie: 2792
+    status: EGZEKWOWANE
+    enforced_by:
+      - contracts/src/community_os_contracts/execution.py
+    test:
+      - contracts/tests/test_invariants.py
+    uwagi: >-
+      Test `test_changing_adapter_version_changes_the_hash`; `ApprovalHashInput` ma `extra="forbid"`,
+      więc pola nie da się po cichu usunąć z hasha (test `test_hash_input_rejects_extra_fields`).
+
+  - id: C-23
+    granica: GR-4
+    opis: >-
+      `ExecutionIntent` jest jednorazowy: najwyżej jedna automatyczna próba submitu.
+      Ze stanów `SUBMIT_STARTED` i `UNKNOWN` nie ma automatycznego retry.
+    zrodlo_w_dokumencie: 2821
+    status: EGZEKWOWANE
+    enforced_by:
+      - contracts/src/community_os_contracts/execution.py
+      - contracts/src/community_os_contracts/enums.py
+    test:
+      - contracts/tests/test_invariants.py
+    uwagi: "Testy `test_intent_is_single_use`, `test_no_automatic_retry_after_submit_started`."
+
+  - id: C-24
+    granica: GR-4
+    opis: >-
+      `viewOnly` po stronie klienta noVNC NIE jest granicą bezpieczeństwa. Rola jest
+      egzekwowana po stronie serwera: CONTROL ticket nie może zostać wydany bez atomowego
+      HUMAN `InteractionLease` i jest związany z jego `generation`.
+    zrodlo_w_dokumencie: 2470
+    status: CZESCIOWO
+    enforced_by:
+      - db/migrations/0001_f0_kernel.sql
+      - contracts/src/community_os_contracts/browser.py
+    test:
+      - contracts/tests/test_invariants.py
+    uwagi: >-
+      CHECK `control_wymaga_interaction_lease`; testy `test_control_ticket_requires_human_interaction_lease`
+      i `test_view_only_ticket_does_not_require_interaction_lease`. RFB-aware gateway z osobnym,
+      wyłącznie serwerowym credentialem TigerVNC jest deliverable'em D06 i nie jest jeszcze
+      częścią tej listy.
+
+  - id: C-25
+    granica: GR-4
+    opis: >-
+      `StreamTicket` jest jednorazowy, krótko żyjący i przechowywany wyłącznie jako hash;
+      ten sam hash nie może zostać wymieniony dwa razy.
+    zrodlo_w_dokumencie: 2333
+    status: EGZEKWOWANE
+    enforced_by:
+      - db/migrations/0001_f0_kernel.sql
+      - contracts/src/community_os_contracts/browser.py
+    test:
+      - contracts/tests/test_invariants.py
+    uwagi: "UNIQUE (ticket_hash) + CHECK `ttl_biletu_nie_dluzszy_niz_sesji`."
+
+  - id: C-26
+    granica: GR-4
+    opis: >-
+      Logowania i MFA nie wykonuje automat. Hasło nie trafia do modelu. Ekran, klawisze,
+      clipboard i CDP trace nie są nagrywane podczas loginu ani MFA; trace i screenshot są
+      wtedy wyłączone.
+    zrodlo_w_dokumencie: 3907
+    status: PLANOWANE
+    faza: E1.F2
+    enforced_by: []
+    test: []
+    uwagi: >-
+      W F0 nie ma żadnego prawdziwego logowania (D20 wymaga człowieka), więc nie ma też kodu,
+      który by nagrywanie włączał albo wyłączał. Kontrola musi powstać RAZEM z pierwszą
+      ścieżką logowania, nie po niej — to jest warunek wejścia do F2 z L3890.
+
+  # ---------------------------------------------------------------------------
+  # GR-5 — granica produktu z sekcji 4
+  # ---------------------------------------------------------------------------
+  - id: C-27
+    granica: GR-5
+    opis: >-
+      Dziewięć zakazanych praktyk z sekcji 4 jest zapisanych jako dane, z dosłownym cytatem
+      i numerem linii, a nie jako zdanie w dokumentacji. Test porównuje cytaty z plikiem roadmapy.
+    zrodlo_w_dokumencie: 241
+    status: EGZEKWOWANE
+    enforced_by:
+      - contracts/src/community_os_contracts/scope.py
+    test:
+      - contracts/tests/test_document_conformance.py
+    uwagi: >-
+      Testy `test_scope_boundary_quotes_the_document_verbatim` i `test_scope_boundary_points_at_the_right_lines`.
+
+  - id: C-28
+    granica: GR-5
+    opis: >-
+      Nie stosujemy spoofingu fingerprintu ani maskowania automatyzacji. Jeżeli headless jest
+      wykrywany i blokowany na danym surface, poprawną odpowiedzią jest `MANUAL_ONLY`, human
+      task albo rezygnacja z surface — nie ukrywanie automatu.
+    zrodlo_w_dokumencie: 4382
+    status: EGZEKWOWANE
+    enforced_by:
+      - services/browser_supervisor/browser_supervisor/args.py
+      - contracts/src/community_os_contracts/scope.py
+      - contracts/src/community_os_contracts/capability.py
+    test:
+      - services/browser_supervisor/tests/test_args_and_profile.py
+      - contracts/tests/test_invariants.py
+    uwagi: >-
+      Testy `test_manual_only_cannot_be_headless` i `test_manual_only_creates_a_human_task`
+      zamykają drugą połowę reguły: capability, której nie da się zrobić headless, nie udaje,
+      że da się ją zrobić headless.
+
+  - id: C-29
+    granica: GR-5
+    opis: >-
+      Nie budujemy rotacji proxy, obchodzenia rate limitów ani równoległych sesji tego samego
+      konta. Odczyt odbywa się w granicach normalnych limitów zalogowanego konta.
+    zrodlo_w_dokumencie: 4403
+    status: CZESCIOWO
+    enforced_by:
+      - services/browser_supervisor/browser_supervisor/args.py
+      - services/profile_lease/profile_lease/store.py
+      - contracts/src/community_os_contracts/scope.py
+    test:
+      - services/browser_supervisor/tests/test_args_and_profile.py
+      - services/profile_lease/tests/test_lease_fencing.py
+    uwagi: >-
+      "Brak równoległych sesji jednego konta" jest egzekwowany przez lease (jeden aktywny
+      lease na profil, jeden profil na konto). "`--proxy-server` zakazany" jest w FORBIDDEN_FLAGS.
+      Budżetu odczytu z sekcji 9.8 nie ma w F0 — to F3.
+
+  - id: C-30
+    granica: GR-5
+    opis: >-
+      Zakaz koordynowanego podbijania tej samej treści przez kilka własnych kont. Jedno konto
+      nie wspiera drugiego własnego konta w tym samym wątku; dwa konta tego samego workspace'u
+      nie działają w tym samym wątku.
+    zrodlo_w_dokumencie: 4513
+    status: PLANOWANE
+    faza: E1.F4
+    enforced_by: []
+    test: []
+    uwagi: >-
+      Reguła jest zapisana jako `ForbiddenPractice.COORDINATED_SELF_AMPLIFICATION` w
+      `contracts/.../scope.py`, ale samego sprawdzenia „to konto już jest w tym wątku"
+      nie ma czym zrobić: nie istnieje ani Conflict Engine (sekcja 19.6), ani tabela wątków,
+      ani kolejka approvali. To jedyna pozycja z sekcji 4, której F0 nie egzekwuje niczym
+      poza deklaracją — zapisana jako pozycja nr 9 w `docs/f0-limits/README.md`.
+
+  - id: C-31
+    granica: GR-5
+    opis: >-
+      Challenge, blokada, MFA, nieznany ekran albo niezgodność zalogowanej tożsamości kończą
+      się kontrolowanym zatrzymaniem, a nie próbą obejścia.
+    zrodlo_w_dokumencie: 253
+    status: CZESCIOWO
+    enforced_by:
+      - contracts/src/community_os_contracts/scope.py
+      - contracts/src/community_os_contracts/enums.py
+      - fixtures/site/src/wenext_fixture_site/app.py
+    test:
+      - fixtures/site/tests/test_mfa_and_challenge.py
+    uwagi: >-
+      `CONTROLLED_STOP_TRIGGERS` jako dane; fixture site produkuje ekrany challenge i MFA,
+      na których da się to sprawdzić. Samego zatrzymania nie ma czego zatrzymywać w F0 —
+      run engine jest F1.
+
+  - id: C-32
+    granica: GR-5
+    opis: >-
+      Brak danych nigdy nie jest zamieniany na zero; jest `UNKNOWN` z powodem. Dotyczy to
+      także decyzji: bramka bez artefaktu dostaje `NIE_URUCHOMIONO`, nigdy `GO`.
+    zrodlo_w_dokumencie: 5242
+    status: EGZEKWOWANE
+    enforced_by:
+      - contracts/src/community_os_contracts/observed.py
+      - tools/gonogo/report.py
+    test:
+      - contracts/tests/test_invariants.py
+    uwagi: >-
+      Testy `test_zero_and_unknown_are_distinguishable`, `test_unknown_without_a_reason_is_impossible`,
+      `test_require_on_unknown_raises_instead_of_returning_zero`.
+
+  - id: C-33
+    granica: GR-5
+    opis: >-
+      Dziennik audytu jest append-only: UPDATE i DELETE na `audit_events` są blokowane
+      triggerem po stronie bazy, a nie konwencją w kodzie.
+    zrodlo_w_dokumencie: 3202
+    status: EGZEKWOWANE
+    enforced_by:
+      - db/migrations/0001_f0_kernel.sql
+    test:
+      - services/profile_lease/tests/test_lease_fencing.py
+    uwagi: >-
+      Trigger `audit_events_bez_zmian`; test `test_audit_is_append_only`. Uczciwie:
+      dokument wymienia tabelę `audit_events` (L3202), ale zdania „audit jest append-only"
+      nie ma dosłownie. Append-only jest rozszerzeniem niezmiennika 17 (L208, „Metryki są
+      append-only i posiadają źródło, czas oraz confidence") na dziennik decyzji i jest
+      decyzją migracji F0, nie cytatem.
+
+  - id: C-34
+    granica: GR-5
+    opis: >-
+      Progi bramek są zamrożone przed pomiarem. Zmiana progu po zobaczeniu wyników musi być
+      widoczna w historii pliku i unieważnia bieżący wynik bramki.
+    zrodlo_w_dokumencie: 4619
+    status: EGZEKWOWANE
+    enforced_by:
+      - tools/gonogo/criteria.yaml
+      - tools/gonogo/report.py
+    test:
+      - docs/threat-model/test_controls.py
+    uwagi: >-
+      Generator nie zna żadnego progu na sztywno — czyta wyłącznie `criteria.yaml`.
+      Test w tym katalogu sprawdza, że `criteria.yaml` ma `zamrozone_dnia`.

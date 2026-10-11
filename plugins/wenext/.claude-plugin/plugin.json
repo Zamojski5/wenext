@@ -1,0 +1,15 @@
+{
+  "name": "wenext",
+  "version": "0.1.0",
+  "description": "Finds the first users for what you built. Reads your code, finds people on Reddit and X who are describing the problem it solves right now, drafts replies in your voice, and publishes from your own accounts only after you approve.",
+  "author": {
+    "name": "Wenext"
+  },
+  "keywords": [
+    "marketing",
+    "reddit",
+    "x",
+    "community",
+    "founders"
+  ]
+}

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Weryfikacja — {{ site_name }}{% endblock %}
+{% block page_id %}challenge{% endblock %}
+{% block content %}
+<section class="narrow">
+  <h1 data-testid="challenge-heading">Potwierdź, że to Ty</h1>
+  <p class="lead">
+    Z tej sesji przyszło nienaturalnie dużo żądań w krótkim czasie. Zanim wrócisz do treści,
+    potwierdź interakcję.
+  </p>
+  <div class="challenge-box" data-testid="challenge-box">
+    <p>Zaznacz pole i potwierdź. Krok wymaga człowieka przy przeglądarce.</p>
+    <form method="post" action="/challenge" data-testid="challenge-form">
+      <label class="checkbox"><input type="checkbox" name="human" required> Nie jestem automatem</label>
+      <input type="hidden" name="next" value="{{ next }}">
+      <button type="submit" data-testid="challenge-submit">Potwierdzam</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

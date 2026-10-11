@@ -1,0 +1,24 @@
+{% macro comment_tree(comments) %}
+<ul class="comments">
+  {% for c in comments %}
+    <li class="comment depth-{{ c.depth }}{{ ' by-author' if c.by_thread_author }}"
+        data-comment-id="{{ c.id }}" data-depth="{{ c.depth }}"
+        data-substantive="{{ 'true' if c.substantive else 'false' }}"
+        data-icp="{{ 'true' if c.icp else 'false' }}">
+      <p class="meta">
+        {% if c.removed_by_moderation %}
+          <span class="removed">[usunięte przez moderację]</span>
+        {% else %}
+          <span class="author">{{ c.author }}</span>
+          {% if c.by_thread_author %}<span class="badge">autor wątku</span>{% endif %}
+          {% if c.icp %}<span class="badge">ICP</span>{% endif %}
+          · {{ c.created_at|ago }} ·
+          <span class="votes-inline {{ 'negative' if c.votes < 0 }}">{{ c.votes }}</span>
+        {% endif %}
+      </p>
+      {% if not c.removed_by_moderation %}<p class="body">{{ c.body }}</p>{% endif %}
+      {% if c.replies %}{{ comment_tree(c.replies) }}{% endif %}
+    </li>
+  {% endfor %}
+</ul>
+{% endmacro %}

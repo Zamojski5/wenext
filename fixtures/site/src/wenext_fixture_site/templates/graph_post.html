@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% import "_comments.html" as ct %}
+{% import "_metrics.html" as mp %}
+{% block title %}{{ thread.title }} — {{ site_name }}{% endblock %}
+{% block page_id %}graph-post{% endblock %}
+{% block content %}
+<article class="thread" data-thread-id="{{ thread.id }}" data-archetype="{{ thread.archetype }}">
+  <p class="crumbs"><a href="/g">Sieć zawodowa</a></p>
+  <p class="meta"><span class="author">{{ thread.author }}</span> · {{ thread.created_at|dt }} ({{ thread.created_at|ago }})</p>
+  <h1>{{ thread.title }}</h1>
+  {% if thread.locked %}
+    <p class="notice negative" data-testid="locked-notice">Komentarze wyłączone.</p>
+  {% endif %}
+  {% if thread.removed_by_moderation %}
+    <p class="notice negative" data-testid="removed-notice">Treść usunięta przez moderację.</p>
+  {% endif %}
+  <div class="post-body">
+    <p>{% if thread.removed_by_moderation %}[usunięte przez moderację]{% else %}{{ thread.body }}{% endif %}</p>
+  </div>
+
+  <p class="reactions" data-testid="reactions">
+    {% for r in thread.reactions %}<span class="badge">{{ r.kind }} {{ r.count }}</span>{% endfor %}
+  </p>
+
+  {% if not thread.removed_by_moderation %}
+    <form class="reaction-form" method="post" action="{{ thread.path }}/reactions" data-testid="reaction-form">
+      <label for="kind">Reakcja</label>
+      <select id="kind" name="kind">
+        <option value="LIKE">LIKE</option>
+        <option value="INSIGHTFUL">INSIGHTFUL</option>
+        <option value="SUPPORT">SUPPORT</option>
+        <option value="CELEBRATE">CELEBRATE</option>
+        <option value="DISAGREE">DISAGREE</option>
+      </select>
+      <button type="submit" data-testid="reaction-submit">Zareaguj</button>
+    </form>
+  {% endif %}
+
+  {{ mp.metrics_panel(thread) }}
+
+  <h2>Komentarze ({{ thread.metrics.reply_count }})</h2>
+  {{ ct.comment_tree(thread.comments) }}
+
+  {% if posted %}
+    <p class="notice" data-testid="write-ack">Akcja przyjęta przez fixture i zapisana w rejestrze prób zapisu.</p>
+  {% endif %}
+
+  {% if thread.locked or thread.removed_by_moderation %}
+    <p class="notice">Formularz komentarza wyłączony dla tego posta.</p>
+  {% else %}
+    <form class="reply-form" method="post" action="{{ thread.path }}/comments" data-testid="comment-form">
+      <label for="body">Twój komentarz</label>
+      <textarea id="body" name="body" rows="3" required></textarea>
+      <button type="submit" data-testid="comment-submit">Skomentuj</button>
+    </form>
+  {% endif %}
+</article>
+<script type="application/json" id="wenext-thread-snapshot">{{ snapshot|safe }}</script>
+{% endblock %}

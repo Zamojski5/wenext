@@ -1,0 +1,319 @@
+# Nakładka produkcyjna: ten sam stack, ale na serwerze, a nie na laptopie założyciela (P7 etap C).
+#
+#   docker compose -f docker-compose.yml -f compose.prod.yml config      # sprawdzenie
+#   docker compose -f docker-compose.yml -f compose.prod.yml up -d       # uruchomienie
+#
+# TO JEST NAKŁADKA, NIE DRUGI COMPOSE. `docker-compose.yml` zostaje nietknięty i nadal opisuje
+# laptop. Druga kopia całości rozjechałaby się z pierwszą przy pierwszej zmianie, a rozjechany
+# opis produkcji jest gorszy niż jego brak: wygląda na prawdę.
+#
+# CO TA NAKŁADKA ZMIENIA I DLACZEGO, po kolei:
+#
+#   1. RUCH Z INTERNETU WCHODZI PRZEZ CADDY. Dashboard i gateway zostają na 127.0.0.1 serwera,
+#      dokładnie jak w pliku bazowym, a proxy sięga do nich po nazwie w sieci compose. Publiczne
+#      są wyłącznie porty proxy. Loopbackowa publikacja backendów zostaje świadomie: to jedyna
+#      droga tunelem ssh do ekranu kapsuły, zanim domena zacznie działać, a z zewnątrz i tak
+#      nie odpowiada. Caddy bierze certyfikat z Let's Encrypt sam, po nazwie z
+#      `WENEXT_PUBLIC_DOMAIN`.
+#   2. FIXTURE-SITE ZNIKA Z DOMYŚLNEGO URUCHOMIENIA. To atrapa serwisu do testów; na serwerze
+#      jest tylko powierzchnią. Nie da się „usunąć" usługi nakładką, więc dostaje własny profil,
+#      którego nikt na produkcji nie włącza.
+#   3. LIMITY ZASOBÓW pod 4 rdzenie i 8 GB. Bez nich jeden Chromium potrafi zjeść maszynę i
+#      zabrać ze sobą bazę; to jest dokładnie ta awaria, którą widzieliśmy 19 września na
+#      laptopie, tyle że tam winna była gra, a tu będzie kapsuła.
+#   4. HEALTHCHECKI MAJĄ DŁUŻSZY LIMIT niż pięć sekund. Zmierzone tego samego wieczoru: przy
+#      obciążonym hoście `api` i `gateway` szły w „unhealthy" mimo że odpowiadały, bo test nie
+#      mieścił się w pięciu sekundach. Healthcheck, który kłamie pod obciążeniem, jest gorszy
+#      niż jego brak: restartuje zdrową usługę dokładnie wtedy, gdy jest najciężej.
+#   5. LOGI Z ROTACJĄ na każdej usłudze osobno. Kotwice YAML (`x-logging`) NIE przechodzą między
+#      plikami, więc nakładka musi powtórzyć rotację tam, gdzie dokłada usługi, i przy okazji
+#      podnosi ją do rozmiarów serwerowych.
+#   6. WOLUMENY NAZWANE, także dla certyfikatów. Bind mount z katalogu repo na serwerze oznacza
+#      certyfikaty kasowane przy `git clean` i bazę kasowaną przy pomyłce w ścieżce.
+#
+# CZEGO TA NAKŁADKA NIE ROBI:
+#   * nie zmienia obrazu kapsuły. Chromium nadal chodzi pod Xvfb i nadal nie ma publikowanego
+#     portu; do ekranu wchodzi się przez gateway za proxy, a logowanie do Reddita opisuje
+#     `docs/WDROZENIE-SERWER.md`;
+#   * nie stawia bazy poza serwerem ani nie robi kopii. Kopie to `tools/dev/backup.sh` (P7 B)
+#     i ich WYNOSZENIE poza serwer, opisane w runbooku;
+#   * nie otwiera portu bazy. Na serwerze `db` nie ma publikacji i mieć nie będzie.
+
+services:
+  db:
+    restart: unless-stopped
+    # Na serwerze baza jest najważniejszą rzeczą, jaka tam stoi, i jako jedyna ma dostać pamięć
+    # z zapasem: przy pełnym dysku albo OOM tracimy stan, a nie tylko uptime.
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 2g
+        reservations:
+          memory: 512m
+    healthcheck:
+      interval: 15s
+      timeout: 15s
+      retries: 5
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  capsule:
+    restart: unless-stopped
+    # ZALEŻNOŚĆ OD ATRAPY ZDJĘTA, BO ATRAPY NA SERWERZE NIE MA. W pliku bazowym kapsuła czeka na
+    # `fixture-site`, żeby testy miały gdzie wejść; na produkcji ten serwis nie startuje, a
+    # zależność od usługi spoza zestawu wywraca całe `docker compose config`. Zmierzone, nie
+    # przewidziane: pierwsza wersja tej nakładki nie dawała się nawet sparsować.
+    depends_on: !reset
+      db:
+        condition: service_healthy
+    # Chromium z ekranem wirtualnym. Najwięcej pamięci po bazie i najtwardszy limit procesora:
+    # to jest usługa, która pod obciążeniem zabiera maszynę reszcie.
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 3g
+        reservations:
+          memory: 1g
+    healthcheck:
+      interval: 20s
+      timeout: 20s
+      retries: 5
+      start_period: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  api:
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1500m
+        reservations:
+          memory: 384m
+    environment:
+      # TRYB LOKALNY WYŁĄCZONY WPROST, nie przez pominięcie. Pusta wartość na serwerze znaczy
+      # „nawet gdyby ktoś ustawił tę zmienną w `.env`, ta nakładka ją zeruje"; test w
+      # `tests/test_prod_overlay.py` tego pilnuje. Wejście bez hasła jest wyłącznie lokalne.
+      WENEXT_LOCAL_AUTOLOGIN: ""
+      # Adresy publiczne liczone z domeny. Ticket na ekran kapsuły sprawdza DOKŁADNY `Origin`
+      # (D-026), więc wartość musi być tym, co zobaczy przeglądarka: https i nazwa, nie 127.0.0.1.
+      WENEXT_STREAM_PUBLIC_ORIGIN: https://${WENEXT_PUBLIC_DOMAIN:?WENEXT_PUBLIC_DOMAIN nie jest ustawione. Wpisz domenę do .env na serwerze, inaczej ticket na ekran kapsuły będzie odrzucany jako obcy origin.}
+    healthcheck:
+      interval: 20s
+      timeout: 20s
+      retries: 5
+      start_period: 90s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  gateway:
+    restart: unless-stopped
+    # PORT ZOSTAJE, ale tak jak w pliku bazowym: na 127.0.0.1 serwera, nie na świecie. Z internetu
+    # wchodzi się przez Caddy, a ta publikacja jest po to, żeby dało się dojść do ekranu kapsuły
+    # tunelem ssh, zanim domena zacznie działać. Zdjęcie jej zabrałoby jedyną drogę do pierwszego
+    # logowania Reddita na świeżym serwerze.
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512m
+    environment:
+      # Ten sam origin, co w `api`: to jest adres, pod którym przeglądarka otwiera ekran.
+      WENEXT_STREAM_ORIGIN: https://${WENEXT_PUBLIC_DOMAIN}
+    healthcheck:
+      interval: 20s
+      timeout: 20s
+      retries: 5
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  dashboard:
+    restart: unless-stopped
+    # Port jak wyżej: 127.0.0.1 serwera, z internetu przez Caddy. Bez profilu, bo na serwerze
+    # studio JEST produktem, a nie opcją włączaną flagą.
+    profiles: !reset []
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 768m
+    environment:
+      # To samo po stronie studia: pasek „tryb lokalny" i wejście bez hasła nie istnieją na
+      # maszynie, która ma domenę.
+      WENEXT_LOCAL_AUTOLOGIN: ""
+      WENEXT_CAPSULE_VIEWER_ORIGIN: https://${WENEXT_PUBLIC_DOMAIN}
+    healthcheck:
+      interval: 20s
+      timeout: 20s
+      retries: 5
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # Hostowany MCP (profil `hosted`, włączany jawnie: `--profile hosted`). Bez wpisu w
+  # LONG_RUNNING testu nakładki i bez `depends_on` w Caddy: zależność od usługi z profilem
+  # wywraca `docker compose config`, gdy profil nie jest włączony (ten sam powód, co przy
+  # `fixture-site` niżej). Caddy po prostu odpowiada 502 na /mcp/*, dopóki usługi nie ma.
+  mcp-edge:
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 384m
+        reservations:
+          memory: 128m
+    healthcheck:
+      interval: 20s
+      timeout: 20s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  fixture-site:
+    # Atrapa serwisu do testów. Profil, którego na serwerze nikt nie włącza, jest jedynym
+    # sposobem, żeby nakładka wyłączyła usługę z pliku bazowego.
+    profiles: [fixtures]
+    restart: "no"
+
+  # ===========================================================================
+  # caddy — jedyne drzwi z internetu
+  # ===========================================================================
+  # Caddy, nie nginx, z jednego powodu: certyfikat z Let's Encrypt bez osobnego demona, bez
+  # crona i bez pliku konfiguracyjnego, w którym trzeba pamiętać o odnowieniu. Konfiguracja
+  # mieści się w czterech liniach i jest tutaj, a nie w osobnym pliku, żeby nie dało się wdrożyć
+  # proxy bez reguł, które opisuje ta nakładka.
+  caddy:
+    # OBRAZ BEZ DIGESTU, ŚWIADOMIE I TYMCZASOWO. Reszta repozytorium przypina obrazy po sumie
+    # kontrolnej (`versions.lock.toml`), a tego digestu nie mam skąd wziąć bez pobrania obrazu.
+    # Wpisanie zmyślonej sumy byłoby gorsze niż jej brak: wyglądałoby na przypięte. Runbook
+    # każe przypiąć digest przy pierwszym wdrożeniu (`docker image inspect`) i dopisać go do
+    # locka razem z portami proxy.
+    image: caddy:2.8.4-alpine
+    restart: unless-stopped
+    networks: [edgenet]
+    # JEDYNE publikowane porty całego stacku. 80 jest potrzebny do wystawienia certyfikatu
+    # (HTTP-01) i do przekierowania na https, a nie do serwowania produktu.
+    # BIND DOMYŚLNIE NA PĘTLI ZWROTNEJ. Serwer ustawia `WENEXT_EDGE_BIND=0.0.0.0` w swoim
+    # `.env` i to jest JEDYNE miejsce w całym repozytorium, w którym coś wychodzi poza 127.0.0.1.
+    # Domyślna wartość jest bezpieczna, żeby uruchomienie tej nakładki na laptopie niczego nie
+    # wystawiło; świadome wystawienie wymaga wpisu w `.env` na maszynie, która ma adres publiczny.
+    # UWAGA: `versions.lock.toml` nie ma jeszcze wpisu dla `caddy`, więc `make check-versions`
+    # będzie protestować, dopóki właściciel tamtego pliku nie doda dwóch pozycji z powodem.
+    # To jest widoczny sygnał do decyzji, a nie obejście reguły.
+    ports:
+      - "${WENEXT_EDGE_BIND:-127.0.0.1}:80:80"
+      - "${WENEXT_EDGE_BIND:-127.0.0.1}:443:443"
+    environment:
+      WENEXT_PUBLIC_DOMAIN: ${WENEXT_PUBLIC_DOMAIN:?WENEXT_PUBLIC_DOMAIN nie jest ustawione}
+      # Adres, na który Let's Encrypt wyśle ostrzeżenie o wygasającym certyfikacie.
+      WENEXT_TLS_EMAIL: ${WENEXT_TLS_EMAIL:?WENEXT_TLS_EMAIL nie jest ustawione. Bez adresu nie ma ostrzeżenia o wygasającym certyfikacie.}
+    command:
+      - caddy
+      - run
+      - --config
+      - /etc/caddy/Caddyfile
+      - --adapter
+      - caddyfile
+    configs:
+      - source: caddyfile
+        target: /etc/caddy/Caddyfile
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      dashboard:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256m
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+# `$$` jest zapisem znaku `$` w compose: bez niego compose podstawia zmienną SAM, zanim Caddy
+# ją zobaczy, i do proxy trafia `{origin.example.com} {`, czyli nazwa w klamrach, którą Caddy
+# odrzuca ("subject does not qualify for certificate"). Z `$$` do Caddy dociera placeholder
+# `{$WENEXT_PUBLIC_DOMAIN}`, który Caddy czyta z własnego środowiska. Zmierzone 11.10 przez
+# `caddy validate` na wyrenderowanym `docker compose config`.
+configs:
+  caddyfile:
+    content: |
+      {
+        email {$$WENEXT_TLS_EMAIL}
+        admin 127.0.0.1:2019
+      }
+      {$$WENEXT_PUBLIC_DOMAIN} {
+        # Ekran kapsuły i strumień RFB idą do gatewaya, reszta do studia. Kolejność ma znaczenie:
+        # dopasowanie ścieżek jest sprawdzane przed regułą ogólną.
+        handle /novnc/* {
+          reverse_proxy gateway:8760
+        }
+        handle /login-capsule* {
+          reverse_proxy gateway:8760
+        }
+        # Hostowany MCP. Dwoje drzwi do jednej usługi: `/mcp` (Worker Cloudflare podpisał osobę
+        # nagłówkiem X-Wenext-Edge) i `/mcp/<token>` (drzwi wewnętrzne, token jest w ścieżce).
+        # Ścieżka jest sekretem, więc ten blok NIE ma `log`, a Caddy nie loguje dostępu bez
+        # dyrektywy `log`. Treść żądania to ramka JSON-RPC, nie plik: 1 MB wystarcza z zapasem.
+        @mcp path /mcp /mcp/*
+        handle @mcp {
+          request_body {
+            max_size 1MB
+          }
+          reverse_proxy mcp-edge:8780
+        }
+        handle /healthz {
+          reverse_proxy dashboard:3000
+        }
+        handle {
+          reverse_proxy dashboard:3000
+        }
+        encode gzip
+        header {
+          # Nagłówki, których brak jest widoczny dopiero po incydencie.
+          Strict-Transport-Security "max-age=31536000"
+          X-Content-Type-Options "nosniff"
+          Referrer-Policy "same-origin"
+        }
+      }
+
+volumes:
+  caddy-data:
+  caddy-config:

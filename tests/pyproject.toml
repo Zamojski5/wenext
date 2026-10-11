@@ -1,0 +1,21 @@
+[project]
+name = "wenext-tests"
+version = "0.1.0"
+description = "Suity akceptacyjne i testy spójności repozytorium — E1.F0"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = ["community-os-contracts"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+only-include = ["test_repo_consistency.py"]
+
+[tool.uv.sources]
+community-os-contracts = { workspace = true }

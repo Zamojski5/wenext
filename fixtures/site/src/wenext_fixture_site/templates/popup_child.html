@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Okno potomne — {{ site_name }}{% endblock %}
+{% block page_id %}lab-popup-child{% endblock %}
+{% block content %}
+<section class="narrow">
+  <h1 data-testid="popup-child-heading">Okno potomne</h1>
+  <p id="popup-marker" data-testid="popup-marker">wenext-popup-child-ok</p>
+  <p><button data-testid="popup-close" onclick="window.close()">Zamknij</button></p>
+</section>
+{% endblock %}

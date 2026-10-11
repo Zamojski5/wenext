@@ -1,0 +1,54 @@
+# Kryteria zapisane PRZED pomiarem (P2 etap B).
+#
+# Sześć wymiarów, w kolejności od „czy w ogóle zrobił, o co chodziło" do „ile to kosztowało".
+# Żadne nie ma progu: nie ma ani jednego przebiegu na prawdziwym modelu, więc każdy próg byłby
+# liczbą wymyśloną. Pole `prog` pozostaje null do pierwszego pomiaru po wdrożeniu.
+wersja: 1
+zapisano: 2026-09-19
+porownywane_sciezki:
+  - id: stara_tura
+    opis: jedno wywołanie modelu z gotowym pakietem kontekstu (observe/turns.py)
+  - id: nowa_sesja
+    opis: wątek silnika z narzędziami, pamięcią i materiałami (P2)
+kryteria:
+  - id: realizacja_celu
+    nazwa: Realizacja celu
+    pytanie: Czy wynik odpowiada na cel postawiony w zadaniu, w ocenie człowieka?
+    pomiar: ocena człowieka, ślepa na ścieżkę, skala 0-2
+    prog: null
+  - id: trafnosc_udzialu
+    nazwa: Trafność udziału albo milczenia
+    pytanie: >-
+      Czy odezwanie się było trafne, a milczenie uzasadnione? Milczenie jest PEŁNOPRAWNYM
+      wynikiem i nie liczy się jako porażka.
+    pomiar: ocena człowieka, tak/nie plus jedno zdanie uzasadnienia
+    prog: null
+  - id: wiernosc_profilowi
+    nazwa: Wierność profilowi
+    pytanie: Czy treść brzmi jak osoba z profilu, czy jak model piszący ogólnie?
+    pomiar: ocena człowieka, skala 0-2
+    prog: null
+  - id: korzystanie_ze_zrodel
+    nazwa: Korzystanie ze źródeł
+    pytanie: >-
+      Ile twierdzeń stoi na materiale, który da się sprawdzić, i ile jest niepopartych? Nowa
+      ścieżka ma narzędzia do sprawdzania; jeśli ich nie użyje, to też jest wynik.
+    pomiar: zliczenie przez człowieka na podstawie śladu wywołań i treści
+    prog: null
+  - id: poprawa_po_uwadze
+    nazwa: Poprawa po uwadze człowieka
+    pytanie: Czy po jednej uwadze („za długie", „nie w ten sposób") druga wersja jest lepsza?
+    pomiar: ocena człowieka na parze wersji, tak/nie
+    prog: null
+  - id: koszt_i_czas
+    nazwa: Koszt i czas
+    pytanie: Ile wywołań modelu, ile wywołań narzędzi i ile czasu zajęła każda ścieżka?
+    pomiar: liczniki ze śladu (session_events dla sesji, pilot_reactions dla tury)
+    prog: null
+uwagi:
+  - >-
+    Model, prompt bazowy i wątek są w obu ścieżkach TE SAME. Inaczej pomiar mierzyłby różnicę
+    promptów, a nie wpływ środowiska, i wyszedłby na korzyść tego, kto pisał nowszy prompt.
+  - >-
+    Porównanie na prawdziwym modelu nie zostało uruchomione. Werdykt tej części to
+    NIE_URUCHOMIONO i nie wolno go zastąpić zerem.

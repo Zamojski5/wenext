@@ -1,0 +1,31 @@
+{
+  "name": "wenext-dashboard",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Operator dashboard skeleton for E1.F1 (L5190). Server components only; the browser never sees the control plane (D-016).",
+  "engines": {
+    "node": "24.20.0",
+    "npm": "11.19.0"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "next": "16.3.3",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@types/node": "26.4.0",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.5",
+    "jsdom": "30.0.1",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11"
+  }
+}

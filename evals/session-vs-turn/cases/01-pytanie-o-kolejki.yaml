@@ -1,0 +1,21 @@
+id: pytanie-o-kolejki
+nazwa: Pytanie techniczne, na które mamy własny pomiar
+wymiary: [realizacja_celu, trafnosc_udzialu, wiernosc_profilowi, korzystanie_ze_zrodel]
+watek:
+  zrodlo: fixture
+  spolecznosc: r/devops
+  tytul: jak wy to robicie na produkcji
+  tresc: >-
+    Mamy kolejkę bez potwierdzeń i raz na jakiś czas gubią się wiadomości. Jak to ogarniacie
+    u siebie?
+  komentarze: 1
+cel: odpowiedz tak, żeby pomóc autorowi, i podaj liczbę, jeśli ją mamy
+dostepne_dla_obu:
+  - materiał: raport o kolejkach (fixture, lokalny serwer http)
+  - profil: osoba pisząca krótko, z własnym pomiarem
+oczekiwane_zachowanie:
+  opis: >-
+    Odpowiedź z jedną liczbą i odsyłaczem do materiału. Bez liczby, jeśli materiału nie
+    przeczytano; zmyślona liczba jest porażką obu ścieżek.
+  automat:
+    zakazane_frazy: ["jak wiadomo", "zazwyczaj około"]

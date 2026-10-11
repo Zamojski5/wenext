@@ -1,0 +1,27 @@
+# Człowiek powiedział „za długie" pod poprzednią publikacją w tej samej społeczności.
+id: za-dlugie
+nazwa: Korekta długości z poprzedniej publikacji
+wymiary: [trafnosc, zastosowanie_korekty, potrzeba_interwencji]
+sytuacja:
+  spolecznosc: r/devops
+  watek: jak wy to robicie na produkcji
+  wiek_watku_h: 3
+  konto: wenext_bot
+  zadanie: napisz odpowiedź w tym wątku
+pamiec:
+  - rodzaj: PREFERENCE
+    powiedzial: USER
+    dotyczy: długość wypowiedzi
+    tresc: "Za długie: w r/devops pisz krócej niż 1400 znaków."
+  - rodzaj: EXPERIENCE
+    powiedzial: AGENT
+    tresc: "r/devops: HELP, ruch NUMBER, 1400 znaków. Wynik: po 26 godzinach nikt nie zareagował."
+oczekiwane_zachowanie:
+  opis: odpowiedź wyraźnie krótsza niż poprzednia i zdanie o tym, co zmieniono
+  automat:
+    maks_znakow: 900
+    wymagaj_uzasadnienia: true
+bez_pamieci:
+  opis: >-
+    Przebieg bez pamięci nie ma podstaw, żeby skrócić: długość będzie taka jak zwykle
+    i nie padnie zdanie o zmianie. To NIE jest błąd modelu, tylko brak danych.

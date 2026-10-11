@@ -1,0 +1,784 @@
+# =============================================================================
+# docker-compose.yml — orkiestracja lokalna fazy E1.F0
+#
+# Plik BEZ klucza `version:` — usunięty ze specyfikacji Compose (patrz
+# versions.lock.toml -> [orchestration.docker_compose]).
+#
+# Trzy rzeczy, które ten plik egzekwuje i których NIE wolno rozluźnić:
+#
+#   1. Nic nie jest wystawione poza pętlę zwrotną. Żaden serwis nie publikuje
+#      portu CDP ani VNC, a każdy port, który JEST publikowany, musi być
+#      zbindowany do 127.0.0.1 i wymieniony z nazwy na allowliście
+#      `[[network.published_ports]]` w versions.lock.toml. NIE grepuj tego
+#      ręcznie — pilnują tego `make check-versions` i tests/test_published_ports.py,
+#      a konwencja niepokryta testem po cichu przestaje obowiązywać.
+#      Niezmiennik nigdy nie brzmiał „jeden port" (D-014): dołożenie drugiego
+#      wymaga świadomej edycji allowlisty W DWÓCH miejscach (lock i test), sam
+#      wpis `ports:` nie wystarczy.
+#      Dwie drogi obejścia, zamknięte 2026-08-31 po przeglądzie czerwonego zespołu:
+#      porty schowane pod kotwicą YAML (`x-cos: &cos` + `<<: *cos`) są teraz
+#      przypisywane do serwisu, który je scala, a `network_mode: host` — który
+#      wystawia WSZYSTKIE porty kontenera bez ani jednego wpisu `ports:` — jest
+#      odrzucany wprost.
+#
+#   2. `capsulenet` jest siecią `internal: true` — kontenery w niej nie mają
+#      wyjścia na świat. W F0 jedynym dozwolonym originem był `fixture-site`
+#      i kapsuła siedziała wyłącznie w tej sieci. Od D-025 (2026-09-03, plan B
+#      Reddita, docs/OUTCOMES.md §6 pkt 6) kapsuła dołącza też do `edgenet`, bo
+#      ma czytać Reddita własnym Chrome'em; granicą przestaje być brak trasy,
+#      a staje się allowlista dokładnych URL-i w czytniku kapsuły
+#      (services/browser_supervisor/browser_supervisor/reader.py) — jedynym
+#      procesie, który tym Chrome'em steruje. `db` i `fixture-site` zostają
+#      wyłącznie w `capsulenet`.
+#
+#   3. Kapsuła działa jako `pwuser` (uid 1000), nie jako root, i dostaje profil
+#      seccomp Playwrighta zamiast `--no-sandbox`. `--no-sandbox` jest w tym
+#      projekcie zakazany (sekcja 4 + wymóg sandboxa Chromium z 14.4), a Chrome
+#      odmawia startu jako root bez tej flagi — więc non-root jest jedyną drogą.
+#
+# KONTRAKT BUILDU DLA WSZYSTKICH DELIVERABLES:
+#   Kontekstem builda KAŻDEGO obrazu jest korzeń repo (`context: .`), a Dockerfile
+#   wskazywany jest przez `dockerfile:`. Powody: (a) workspace uv wymaga
+#   root `pyproject.toml` + `uv.lock` przy instalacji dowolnego membera,
+#   (b) `versions.lock.toml` musi być w kontekście, bo to z niego Dockerfile
+#   czyta piny. Nie zmieniaj kontekstu na podkatalog — złamiesz oba.
+#
+# Brak kluczy `platform:` jest zamierzony: wszystkie obrazy bazowe są multi-arch,
+# więc Docker wybiera architekturę hosta natywnie i `docker compose config`
+# nie zgłasza ostrzeżenia o platformie. Wpisanie tu `linux/arm64` zepsułoby CI
+# na amd64, a `linux/amd64` uruchomiłoby Chrome pod emulacją — ścieżkę odrzuconą.
+# =============================================================================
+
+name: wenext
+
+# -----------------------------------------------------------------------------
+# Sieci
+# -----------------------------------------------------------------------------
+networks:
+  # Sieć kapsuły. `internal: true` = brak NAT i brak trasy do świata.
+  # Kontener w tej sieci może rozmawiać wyłącznie z innymi kontenerami compose.
+  capsulenet:
+    driver: bridge
+    internal: true
+
+  # Sieć brzegowa. Istnieje z trzech powodów i tylko z tych trzech:
+  #   - publikacja portu wymaga sieci nie-internal (gateway, dashboard),
+  #   - `codex` musi dosięgnąć API OpenAI (i NIE ma dostępu do capsulenet),
+  #   - `api` od Outcome A czyta publiczne/oficjalne API platform i woła model (D-023).
+  edgenet:
+    driver: bridge
+
+# -----------------------------------------------------------------------------
+# Wolumeny
+# -----------------------------------------------------------------------------
+volumes:
+  # Dane Postgresa. NAMED VOLUME, nigdy bind mount z macOS: VirtioFS zabija
+  # fsync, a fencing leasa opiera się na tym, że commit naprawdę jest trwały.
+  # Mount idzie na /var/lib/postgresql (deklarowany VOLUME obrazu PG 18),
+  # a nie na /var/lib/postgresql/data — w PG 18 PGDATA to
+  # /var/lib/postgresql/18/docker i mount na starej ścieżce niczego nie utrwala.
+  pgdata:
+
+  # Katalogi user-data-dir Chromium, jeden podkatalog na konto.
+  # Montowany WYŁĄCZNIE do kapsuły. Nigdy do `codex` (threat model L3894-3896).
+  profiles:
+
+  # Runtime kapsuły: gniazdo unix Xtigervnc i plik DevToolsActivePort.
+  # Współdzielony z gatewayem, bo to po tym gnieździe idzie strumień RFB.
+  # Dzięki temu port VNC nie musi istnieć ani w sieci, ani na hoście.
+  capsule-run:
+
+  # D-051: the X account has a capsule of its own (Chromium, because Google refuses a person's
+  # sign-in in Chrome for Testing). Its profiles and its screen socket live apart from Reddit's:
+  # one capsule, one account, one profile, one build.
+  x-profiles:
+  capsule-x-run:
+
+  # CODEX_HOME — osobny wolumen, świadomie NIE w repo. Codex zapisuje tu stan
+  # sesji i poświadczenia; trzymanie tego w drzewie repo to prosta droga do
+  # zacommitowania tokenu. Od Outcome A montowany także do `api` (tury modelu
+  # dla obrazu community i osądów wykonuje control plane).
+  codex-home:
+
+# -----------------------------------------------------------------------------
+# Fragmenty wspólne
+# -----------------------------------------------------------------------------
+x-restart: &restart
+  restart: unless-stopped
+
+x-logging: &logging
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+x-db-env: &db-env
+  POSTGRES_HOST: db
+  POSTGRES_PORT: "5432"
+  POSTGRES_USER: ${POSTGRES_USER:-wenext}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD nie jest ustawione. Uruchom `make env` (skopiuje .env.example do .env) albo ustaw je sam.}
+  POSTGRES_DB: ${POSTGRES_DB:-wenext}
+
+x-app-env: &app-env
+  WENEXT_ENV: ${WENEXT_ENV:-local}
+  # Tryb lokalny bez hasła (identity/local_access.py): pusty = wyłączony. Wartość to e-mail
+  # albo nazwa organizacji właściciela; api i dashboard sprawdzają warunki osobno.
+  WENEXT_LOCAL_AUTOLOGIN: ${WENEXT_LOCAL_AUTOLOGIN:-}
+  WENEXT_PHASE: E1.F0
+  PYTHONUNBUFFERED: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+  TZ: ${TZ:-Europe/Warsaw}
+
+services:
+  # ===========================================================================
+  # db — kanoniczne źródło prawdy F0
+  # ===========================================================================
+  # PG 18 daje uuidv7() i RETURNING old./new. — to drugie mocno upraszcza
+  # atomowy claim leasa z odczytem NOWEJ generacji w jednym zapytaniu (D09).
+  db:
+    image: postgres:18.6-trixie@sha256:4ef4dbc939d61acea57712655ddb4b4ab27419c913f94cca0cd57cb3ea3c2280
+    networks: [capsulenet]
+    environment:
+      <<: *db-env
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 3s
+      retries: 40
+      start_period: 5s
+    stop_grace_period: 30s
+    <<: [*restart, *logging]
+
+  # ===========================================================================
+  # capsule — jedna kapsuła = jedno konto
+  # ===========================================================================
+  # Jeden proces Chromium, jeden user-data-dir, jeden lease. Domyślnie HEADLESS:
+  # bez displayu, bez WM, bez VNC. Tryb INTERACTIVE dokłada Xtigervnc + openbox
+  # na TYM SAMYM profilu i TYM SAMYM exact executable — to jest cała treść testu
+  # przekazania profilu z L5162 i L5176.
+  #
+  # Playwright i Chrome siedzą w jednym kontenerze, więc is_local=True i nie ma
+  # limitu 50 MB na upload przez CDP.
+  capsule:
+    build:
+      context: .
+      dockerfile: infra/capsule/Dockerfile
+    # `capsulenet`: widoczna dla `api` po nazwie (czytnik). `edgenet`: od D-025 kapsuła
+    # MA wyjście na świat, bo czyta Reddita własnym Chrome'em — patrz nagłówek pkt 2.
+    networks: [capsulenet, edgenet]
+
+    # BRAK `ports:`. Port CDP (9222) jest bindowany do 127.0.0.1 WEWNĄTRZ
+    # przestrzeni sieciowej kontenera, port VNC nie istnieje jako port TCP —
+    # Xtigervnc słucha na gnieździe unix w /run/wenext/capsule.
+    # Wystawienie któregokolwiek z nich na host łamie DoD.
+    # Czytnik (D-025) słucha na porcie kontenera WENEXT_READER_PORT — też bez
+    # `ports:`; z hosta jest nieosiągalny, z sieci compose wymaga tokenu.
+
+    init: true          # PID 1 zbierający sieroty po Chromium (odpowiednik --init)
+    shm_size: 2gb       # zamiast ipc: host — Chromium ma dość /dev/shm bez oddawania
+                        # namespace'u IPC hosta. Spec dopuszcza oba; wybrany wariant
+                        # izolujący, bo kapsuła ma być kapsułą.
+    user: pwuser        # uid 1001 (własny użytkownik obrazu kapsuły; ten sam uid ma gateway,
+                        # żeby czytać socket i plik poświadczeń Xvnc). Obraz startuje jako root,
+                        # więc bez tego Chrome zażądałby --no-sandbox (zakazane).
+    cap_drop: [ALL]
+    # Dokładnie jedna capability z powrotem. Zmierzone: bez niej Chromium przerywa
+    # start z `Check failed: sys_chroot("/proc/self/fdinfo/") == 0` i zygote ginie —
+    # sandbox namespace'owy robi chroot wewnątrz nowego user namespace'u, a przy
+    # pustym bounding secie nie ma jak uzyskać CAP_SYS_CHROOT.
+    # Alternatywą byłoby --no-sandbox, które jest w tym projekcie zakazane.
+    # NIE dodawaj tu SYS_ADMIN — nie jest potrzebny i daje ucieczkę z kontenera.
+    cap_add: [SYS_CHROOT]
+    security_opt:
+      - no-new-privileges:true
+      - seccomp:./infra/browser/seccomp_profile.json   # D05; default Docker + clone/setns/unshare
+
+    environment:
+      <<: [*app-env, *db-env]
+      WENEXT_CAPSULE_ID: ${WENEXT_CAPSULE_ID:-capsule-01}
+      # HEADLESS albo INTERACTIVE. Domyślna jest headless — headful to ścieżka
+      # WYJĄTKOWA, uruchamiana tylko dla LOGIN / MFA / CHALLENGE / HUMAN_TAKEOVER.
+      WENEXT_BROWSER_MODE: ${WENEXT_BROWSER_MODE:-HEADLESS}
+      WENEXT_CDP_HOST: 127.0.0.1
+      WENEXT_CDP_PORT: "9222"
+      WENEXT_PROFILES_DIR: /var/wenext/profiles
+      WENEXT_RUN_DIR: /run/wenext/capsule
+      WENEXT_VNC_SOCKET: /run/wenext/capsule/vnc.sock
+      WENEXT_DEVTOOLS_PORT_FILE: /var/wenext/profiles/${WENEXT_CAPSULE_ID:-capsule-01}/DevToolsActivePort
+      # Jedyny dozwolony origin w F0.
+      WENEXT_ALLOWED_ORIGIN: http://fixture-site:8000
+      # Czytnik stron (D-025): `GET /read?url=…` na porcie kontenera, wyłącznie URL-e `.json`
+      # Reddita z allowlisty w reader.py, za tokenem współdzielonym z `api`. Pusty token =
+      # kapsuła NIE startuje (fail-closed), bo czytnik bez tokenu to otwarty ster przeglądarki.
+      WENEXT_READER_BIND: 0.0.0.0
+      WENEXT_READER_PORT: "8765"
+      WENEXT_READER_TOKEN: ${WENEXT_BROWSER_READER_TOKEN:-}
+      # Aktuator komentarzy (R4 minimalny, D-028): osobny sekret; bez niego POST /act/comment
+      # odpowiada 404 i kapsuła nie może pisać.
+      WENEXT_WRITER_TOKEN: ${WENEXT_BROWSER_WRITER_TOKEN:-}
+      WENEXT_READER_MIN_INTERVAL_SECONDS: ${WENEXT_READER_MIN_INTERVAL_SECONDS:-2}
+      # P0 (STAN-PRAC §8.29): odczyt anonimowy permalinku (świeży kontekst bez sesji) i skrzynka
+      # konta (/message/inbox.json) mówią, czy komentarz jest widoczny publicznie i czy moderator
+      # go zdjął. W kodzie oba przełączniki są domyślnie wyłączone; tutaj włączone, bo bez nich
+      # każda publikacja zostaje UNVERIFIED na zawsze. Wyłączenie: wartość 0 w .env.
+      WENEXT_READER_ALLOW_ANONYMOUS: ${WENEXT_READER_ALLOW_ANONYMOUS:-1}
+      WENEXT_READER_ALLOW_INBOX: ${WENEXT_READER_ALLOW_INBOX:-1}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-wenext}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-wenext}
+
+    volumes:
+      - profiles:/var/wenext/profiles
+      - capsule-run:/run/wenext/capsule
+
+    depends_on:
+      db:
+        condition: service_healthy
+      fixture-site:
+        condition: service_healthy
+
+    healthcheck:
+      # Zdrowa kapsuła = Chromium odpowiada na CDP **i jest to nasz przypięty build**.
+      #
+      # NIE pytamy o stały port 9222: kapsuła startuje z `--remote-debugging-port=0`,
+      # bo stały port kolidowałby między kapsułami na jednym runnerze. Faktyczny numer
+      # jest w `DevToolsActivePort` i healthcheck czyta go tą samą ścieżką kodu, co
+      # Gateway przy dołączaniu — razem z odrzuceniem niezgodnego builda (L5159).
+      test: ["CMD", "python3", "-m", "browser_supervisor.healthcheck"]
+      interval: 3s
+      timeout: 5s
+      retries: 25
+      start_period: 25s
+
+    stop_grace_period: 20s
+    <<: [*restart, *logging]
+
+  # ===========================================================================
+  # gateway — jedyny serwis publikowany na host
+  # ===========================================================================
+  # RFB-aware proxy WebSocket <-> gniazdo unix. Handshake VncAuth robi SERWER,
+  # własnym poświadczeniem (full albo view-only, zależnie od roli ze StreamTicketu),
+  # a przeglądarce oferuje SecurityType=None. Hasło VNC nigdy nie opuszcza serwera.
+  # Serwuje też statyczny noVNC v1.7.0 na osobnym originie z CSP.
+  gateway:
+    build:
+      context: .
+      dockerfile: services/stream_gateway/Dockerfile
+    # Dwie sieci: capsulenet po gniazdo i bazę, edgenet bo publikacja portu
+    # wymaga sieci nie-internal.
+    networks: [capsulenet, edgenet]
+
+    # JEDYNA publikacja portu w całym repo. Bind na 127.0.0.1 — nie 0.0.0.0.
+    ports:
+      - "127.0.0.1:${WENEXT_GATEWAY_HOST_PORT:-8760}:8760"
+
+    environment:
+      <<: [*app-env, *db-env]
+      WENEXT_GATEWAY_BIND: 0.0.0.0:8760      # 0.0.0.0 wewnątrz kontenera; na hoście i tak tylko 127.0.0.1
+      WENEXT_VNC_SOCKET: /run/wenext/capsule/vnc.sock
+      WENEXT_NOVNC_ORIGIN_PATH: /novnc
+      WENEXT_STREAM_TICKET_TTL_SECONDS: ${WENEXT_STREAM_TICKET_TTL_SECONDS:-120}
+      # Poziom 2 planu B (D-026): origin, z którego przeglądarka założyciela otwiera /login-capsule
+      # i wymienia ticket (dokładny `Origin`, L2345) — ten sam port, który publikujemy na host.
+      WENEXT_STREAM_ORIGIN: http://127.0.0.1:${WENEXT_GATEWAY_HOST_PORT:-8760}
+      # Tickety wystawia wyłącznie control plane: nagłówek X-Wenext-Issuer-Token z tym tokenem.
+      # Puste = wystawianie WYŁĄCZONE (503), nie otwarte.
+      WENEXT_GATEWAY_ISSUER_TOKEN: ${WENEXT_GATEWAY_ISSUER_TOKEN:-}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-wenext}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-wenext}
+
+    volumes:
+      # rw, nie ro: connect() do gniazda unix wymaga prawa zapisu na gnieździe.
+      - capsule-run:/run/wenext/capsule
+
+    depends_on:
+      db:
+        condition: service_healthy
+      capsule:
+        condition: service_healthy
+
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - |
+          import sys, urllib.request
+          try:
+              with urllib.request.urlopen("http://127.0.0.1:8760/healthz", timeout=3) as r:
+                  sys.exit(0 if r.status == 200 else 1)
+          except Exception:
+              sys.exit(1)
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    <<: [*restart, *logging]
+
+  # ===========================================================================
+  # capsule-x: the X account's capsule (D-051)
+  # ===========================================================================
+  # The same image, sandbox, user and reader as `capsule`, with three differences: the build is
+  # Chromium (Google refuses a person's sign-in in Chrome for Testing, measured 27.09), the
+  # profile is its own, and so is the screen socket its gateway reads. Reddit's capsule and its
+  # logged-in profile are untouched: mixing two builds on one profile is forbidden (L2308).
+  capsule-x:
+    extends:
+      service: capsule
+    environment:
+      WENEXT_CAPSULE_ID: ${WENEXT_X_CAPSULE_ID:-x-01}
+      WENEXT_BROWSER_BUILD: chromium
+      WENEXT_BROWSER_BIN: /ms-playwright/chromium-1234/chrome-linux/chrome
+      WENEXT_DEVTOOLS_PORT_FILE: /var/wenext/profiles/${WENEXT_X_CAPSULE_ID:-x-01}/DevToolsActivePort
+    volumes:
+      - x-profiles:/var/wenext/profiles
+      - capsule-x-run:/run/wenext/capsule
+
+  # ===========================================================================
+  # gateway-x: the screen of the X capsule, for a person signing in (D-051)
+  # ===========================================================================
+  # A second instance of the same gateway, written out because `extends` would concatenate the
+  # port list and publish 8760 twice. Its own published port and origin; tickets come from the
+  # same control plane with the same issuer token.
+  gateway-x:
+    build:
+      context: .
+      dockerfile: services/stream_gateway/Dockerfile
+    networks: [capsulenet, edgenet]
+    ports:
+      - "127.0.0.1:${WENEXT_X_GATEWAY_HOST_PORT:-8761}:8760"
+    environment:
+      <<: [*app-env, *db-env]
+      WENEXT_GATEWAY_BIND: 0.0.0.0:8760
+      WENEXT_VNC_SOCKET: /run/wenext/capsule/vnc.sock
+      WENEXT_NOVNC_ORIGIN_PATH: /novnc
+      WENEXT_STREAM_TICKET_TTL_SECONDS: ${WENEXT_STREAM_TICKET_TTL_SECONDS:-120}
+      WENEXT_STREAM_ORIGIN: http://127.0.0.1:${WENEXT_X_GATEWAY_HOST_PORT:-8761}
+      WENEXT_GATEWAY_ISSUER_TOKEN: ${WENEXT_GATEWAY_ISSUER_TOKEN:-}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-wenext}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-wenext}
+    volumes:
+      - capsule-x-run:/run/wenext/capsule
+    depends_on:
+      db:
+        condition: service_healthy
+      capsule-x:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - |
+          import sys, urllib.request
+          try:
+              with urllib.request.urlopen("http://127.0.0.1:8760/healthz", timeout=3) as r:
+                  sys.exit(0 if r.status == 200 else 1)
+          except Exception:
+              sys.exit(1)
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    <<: [*restart, *logging]
+
+  # ===========================================================================
+  # fixture-site — jedyny dozwolony origin w F0
+  # ===========================================================================
+  # Dwa archetypy, osiem wymiarów 22.7, strona logowania z fikcyjnym MFA
+  # (test przekazania profilu BEZ prawdziwego konta social), popupy i formularz.
+  # Deterministyczny po seedzie — evale i testy muszą być powtarzalne.
+  fixture-site:
+    build:
+      context: .
+      dockerfile: fixtures/site/Dockerfile
+    networks: [capsulenet]
+    environment:
+      <<: *app-env
+      WENEXT_FIXTURE_BIND: 0.0.0.0:8000
+      WENEXT_FIXTURE_SEED: ${WENEXT_FIXTURE_SEED:-20260830}
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - |
+          import sys, urllib.request
+          try:
+              with urllib.request.urlopen("http://127.0.0.1:8000/healthz", timeout=3) as r:
+                  sys.exit(0 if r.status == 200 else 1)
+          except Exception:
+              sys.exit(1)
+      interval: 2s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    <<: [*restart, *logging]
+
+  # ===========================================================================
+  # api — control plane fazy E1.F1
+  # ===========================================================================
+  # FastAPI + PostgreSQL (L5190). Kolejka jobów, ścieżka zgody i audyt mieszkają
+  # w tym procesie; dispatcher siedzi za `JobTransportPort`, żeby dołożenie
+  # brokera w E3 nie ruszyło komend domenowych.
+  #
+  # BRAK `ports:` I TAK MA ZOSTAĆ. Control plane nie jest publikowany na host —
+  # jedynym jego klientem jest serwerowa strona dashboardu (D-016: ciasteczko
+  # sesji nigdy nie trafia do kodu przeglądarkowego). Dopisanie tu `ports:`
+  # rozszerza granicę uwierzytelnienia o cały host i wymaga nowej decyzji,
+  # nie jednej linijki.
+  api:
+    build:
+      context: .
+      dockerfile: services/control_plane/Dockerfile
+    # Od Outcome A (2026-09-03) control plane MA wyjście na świat: adaptery obserwacji czytają
+    # publiczne/oficjalne API platform (Algolia HN, oauth.reddit.com — D-023), a SDK Codexa
+    # sięga do API OpenAI. Pierwszy prawdziwy poll na samej `capsulenet` padł na
+    # „Temporary failure in name resolution" — zmierzone, nie założone. Kapsuła Chrome dalej
+    # NIE ma wyjścia na świat; ta granica dotyczy przeglądarki, nie control plane'u.
+    networks: [capsulenet, edgenet]
+    environment:
+      <<: [*app-env, *db-env]
+      WENEXT_CONTROL_PLANE_BIND: 0.0.0.0:8000   # 0.0.0.0 WEWNĄTRZ kontenera; na host nic nie wychodzi
+      WENEXT_ARTIFACTS_DIR: /var/wenext/artifacts
+      DATABASE_URL: postgresql://${POSTGRES_USER:-wenext}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-wenext}
+      # Outcome A (docs/OUTCOMES.md §5): obraz community i osądy wykonują tury modelu W TYM
+      # procesie, na zalogowanym CODEX_HOME z wolumenu `codex-home` (ten sam, który zapełnia
+      # `make codex-gonogo`). Bez auth.json joby modelu parkują w WAITING_AUTH — obserwacja
+      # (poll, snapshoty) działa niezależnie.
+      WENEXT_CODEX_HOME: /var/wenext/codex-home
+      # Reddit przez oficjalne API OAuth (D-023). Puste = adapter mówi CredentialsMissing.
+      WENEXT_REDDIT_CLIENT_ID: ${WENEXT_REDDIT_CLIENT_ID:-}
+      WENEXT_REDDIT_CLIENT_SECRET: ${WENEXT_REDDIT_CLIENT_SECRET:-}
+      WENEXT_REDDIT_USERNAME: ${WENEXT_REDDIT_USERNAME:-}
+      WENEXT_REDDIT_PASSWORD: ${WENEXT_REDDIT_PASSWORD:-}
+      WENEXT_REDDIT_USER_AGENT: ${WENEXT_REDDIT_USER_AGENT:-wenext-community-observer/0.1 (read-only observation)}
+      # Reddit przez zalogowaną przeglądarkę kapsuły (D-025, plan B). OPT-IN: domyślnie puste, czyli
+      # adapter API (D-023). Dopiero jawne WENEXT_BROWSER_READER_URL=http://capsule:8765 w .env
+      # przełącza REDDIT na Chrome kapsuły (wtedy WENEXT_REDDIT_* powyżej nie są używane). Token musi
+      # być ten sam, co w kapsule. Sama obecność kontenera `capsule` niczego nie włącza.
+      WENEXT_BROWSER_READER_URL: ${WENEXT_BROWSER_READER_URL:-}
+      WENEXT_BROWSER_READER_TOKEN: ${WENEXT_BROWSER_READER_TOKEN:-}
+      WENEXT_BROWSER_WRITER_TOKEN: ${WENEXT_BROWSER_WRITER_TOKEN:-}
+      # `true`: bez zalogowanej sesji w kapsule joby Reddita parkują w WAITING_CAPABILITY zamiast
+      # czytać anonimowo. Odczyt ma być odczytem konta założyciela (STAN-PROJEKTU pkt 4).
+      WENEXT_REDDIT_REQUIRE_LOGIN: ${WENEXT_REDDIT_REQUIRE_LOGIN:-true}
+      # Karta „przeglądarka agenta" (poziom 2, D-026): control plane otwiera sesję człowieka w
+      # kapsule i wystawia przez gateway jednorazowy ticket; publiczny origin to adres, który
+      # otwiera przeglądarka założyciela (host, nie sieć compose).
+      WENEXT_GATEWAY_URL: ${WENEXT_GATEWAY_URL:-http://gateway:8760}
+      WENEXT_GATEWAY_ISSUER_TOKEN: ${WENEXT_GATEWAY_ISSUER_TOKEN:-}
+      WENEXT_STREAM_PUBLIC_ORIGIN: ${WENEXT_STREAM_PUBLIC_ORIGIN:-http://127.0.0.1:${WENEXT_GATEWAY_HOST_PORT:-8760}}
+      # D-051: X through its own capsule and screen. Opt-in like Reddit's: without
+      # WENEXT_X_BROWSER_READER_URL=http://capsule-x:8765 in .env, X uses the capsule above.
+      WENEXT_X_BROWSER_READER_URL: ${WENEXT_X_BROWSER_READER_URL:-}
+      WENEXT_X_GATEWAY_URL: ${WENEXT_X_GATEWAY_URL:-http://gateway-x:8760}
+      WENEXT_X_STREAM_PUBLIC_ORIGIN: ${WENEXT_X_STREAM_PUBLIC_ORIGIN:-http://127.0.0.1:${WENEXT_X_GATEWAY_HOST_PORT:-8761}}
+    volumes:
+      - ./artifacts:/var/wenext/artifacts
+      # Ten sam uid 1000 co w obrazie codex-runtime, więc auth.json zapisany przez logowanie
+      # jest czytelny tutaj. Wolumen NIE jest bind mountem z repo (patrz `volumes:` na górze).
+      - codex-home:/var/wenext/codex-home
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      # `/healthz` jest JEDYNĄ trasą poza granicą operatora — gdyby wymagała
+      # poświadczenia, healthcheck kontenera nigdy nie stałby się zielony i cały
+      # stack wisiałby na `--wait`. Reszta tras odpowiada 401 z pustym ciałem.
+      test:
+        - CMD
+        - python3
+        - -c
+        - |
+          import sys, urllib.request
+          try:
+              with urllib.request.urlopen("http://127.0.0.1:8000/healthz", timeout=3) as r:
+                  sys.exit(0 if r.status == 200 else 1)
+          except Exception:
+              sys.exit(1)
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    user: "1000:1000"
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 20s
+    <<: [*restart, *logging]
+
+  # ===========================================================================
+  # mcp-edge — hostowany MCP dla agentów obcych założycieli (profil `hosted`)
+  # ===========================================================================
+  # `POST /mcp` (podpisana tożsamość z brzegu) i `POST /mcp/<token>` (drzwi wewnętrzne) mówią
+  # JSON-RPC (control_plane.hosted.http_app), jeden projekt na osobę.
+  # Ten sam obraz co `api`, ale to jest OSOBNA usługa i nie moduł `control_plane.api`: granica
+  # operatora (`auth.py`, PUBLIC_PATHS przypięte testami) nie zostaje rozszerzona o żadną trasę.
+  #
+  # ŚWIADOME BRAKI, które są wymogiem, a nie przeoczeniem (test w tests/test_hosted_compose.py):
+  #   - brak kapsuły, gatewaya i czytnika przeglądarkowego: żadnej zmiennej WENEXT_CAPSULE_*,
+  #     WENEXT_GATEWAY_*, WENEXT_BROWSER_*, WENEXT_*_BROWSER_*, ani poświadczeń Reddita i X;
+  #     obcy agent dostaje obiekty produktu i SERP API, nie przeglądarkę założyciela,
+  #   - brak wolumenów (nie ma profili, CODEX_HOME ani artefaktów),
+  #   - brak `ports:` (z internetu wchodzi się przez Caddy z nakładki produkcyjnej).
+  # `--no-access-log`: log dostępowy uvicorna drukuje ścieżkę, a ścieżka jest tokenem.
+  mcp-edge:
+    profiles: [hosted]
+    build:
+      context: .
+      dockerfile: services/control_plane/Dockerfile
+    networks: [capsulenet, edgenet]
+    command:
+      - uvicorn
+      - control_plane.hosted.http_app:create_app
+      - --factory
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8780"
+      - --no-access-log
+    environment:
+      <<: *db-env
+      WENEXT_ENV: ${WENEXT_ENV:-local}
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      TZ: ${TZ:-Europe/Warsaw}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-wenext}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-wenext}
+      # Domena ORIGINU (np. origin.getwenext.com), nie Workera: z niej `invite create` składa
+      # polecenia dla drzwi wewnętrznych (/mcp/<token>).
+      WENEXT_PUBLIC_DOMAIN: ${WENEXT_PUBLIC_DOMAIN:-}
+      # Sekret wspólny z Workerem Cloudflare (infra/cloudflare/mcp-edge): Worker podpisuje nim
+      # nagłówek X-Wenext-Edge z tożsamością osoby, a tutaj to jest cała jej weryfikacja (nie ma
+      # tu żadnego OAuth). Puste = drzwi produktu (`POST /mcp`) wyłączone, zostają tokeny.
+      WENEXT_EDGE_SECRET: ${WENEXT_EDGE_SECRET:-}
+      # Czytanie Reddita przez SERP API (Serper). Puste = narzędzie mówi uczciwie "niedostępne".
+      SERPER_API_KEY: ${SERPER_API_KEY:-}
+      # Limit wywołań narzędzi na token na godzinę; 0 wyłącza.
+      WENEXT_HOSTED_CALLS_PER_HOUR: ${WENEXT_HOSTED_CALLS_PER_HOUR:-600}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - |
+          import sys, urllib.request
+          try:
+              with urllib.request.urlopen("http://127.0.0.1:8780/healthz", timeout=3) as r:
+                  sys.exit(0 if r.status == 200 else 1)
+          except Exception:
+              sys.exit(1)
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    user: "1000:1000"
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 20s
+    <<: [*restart, *logging]
+
+  # ===========================================================================
+  # dashboard — cienki ekran operatora (profil `dashboard`)
+  # ===========================================================================
+  # Next.js, wersja i obraz bazowy z versions.lock.toml [stack.js]. DRUGI i
+  # OSTATNI port publikowany na host (D-014), zawsze na pętli zwrotnej.
+  #
+  # Dashboard rozmawia z control plane WYŁĄCZNIE po stronie serwera (D-016) —
+  # dlatego siedzi w `capsulenet` (żeby widzieć `api` po nazwie) i w `edgenet`
+  # (bo publikacja portu wymaga sieci nie-internal, tak samo jak u gatewaya).
+  #
+  # W F1 ten ekran pokazuje wyłącznie encje, które F1 naprawdę zapisuje: joby,
+  # przejścia stanów, audit events, ścieżkę zgody. Na pustej bazie pokazuje stany
+  # puste i NIE pada — atrapy są zakazane (D-013).
+  dashboard:
+    profiles: [dashboard]
+    build:
+      context: .
+      dockerfile: apps/dashboard/Dockerfile
+    networks: [capsulenet, edgenet]
+    ports:
+      - "127.0.0.1:${WENEXT_DASHBOARD_HOST_PORT:-3000}:3000"
+    environment:
+      <<: *app-env
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: "3000"
+      # Adres control plane widziany z serwera Next.js. NIE jest to zmienna
+      # `NEXT_PUBLIC_*` i nią być nie może: wartość z prefiksem NEXT_PUBLIC_
+      # trafia do bundla przeglądarki, a wtedy klient rozmawiałby z API
+      # bezpośrednio — dokładnie to, czego D-016 zabrania.
+      WENEXT_CONTROL_PLANE_URL: http://api:8000
+      # Karta „przeglądarka agenta" (D-026, poziom 2): jedyny origin, na który dashboard może
+      # odpowiedzieć 303 z `href` z control plane'u — allowlista przeciw open redirect. Ta sama
+      # wartość, co WENEXT_STREAM_PUBLIC_ORIGIN w `api` (adres gatewaya widziany z hosta).
+      WENEXT_CAPSULE_VIEWER_ORIGIN: ${WENEXT_STREAM_PUBLIC_ORIGIN:-http://127.0.0.1:${WENEXT_GATEWAY_HOST_PORT:-8760}}
+      # D-051: the X capsule's screen has its own origin; the same allowlist rule, one more entry.
+      WENEXT_X_CAPSULE_VIEWER_ORIGIN: ${WENEXT_X_STREAM_PUBLIC_ORIGIN:-http://127.0.0.1:${WENEXT_X_GATEWAY_HOST_PORT:-8761}}
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - |
+          fetch("http://127.0.0.1:3000/healthz")
+            .then((r) => process.exit(r.ok ? 0 : 1))
+            .catch(() => process.exit(1));
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+    user: "1000:1000"
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    <<: [*restart, *logging]
+
+  # ===========================================================================
+  # codex — runtime modeli (profil `codex`)
+  # ===========================================================================
+  # Poza `make up`, bo DoD wymaga, żeby `make up` startowało dokładnie
+  # db + capsule + gateway + fixture-site i było healthy w < 90 s. Codex bez
+  # konta ChatGPT i tak nie wykona turna — potrzebuje D20.
+  #
+  # ŚWIADOME BRAKI, które są wymogiem threat modelu (L3894-3896), a nie przeoczeniem:
+  #   - brak wolumenu `profiles` (żadnego dostępu do profili Chromium),
+  #   - brak DATABASE_URL i POSTGRES_* (żadnych sekretów bazy),
+  #   - brak `capsulenet` (nie widzi ani bazy, ani kapsuły, ani fixture-site).
+  # Jeżeli kiedykolwiek dopiszesz tu któreś z tych trzech, unieważniasz GATE-3.
+  codex:
+    profiles: [codex]
+    build:
+      context: .
+      dockerfile: services/codex_runtime/Dockerfile
+    networks: [edgenet]
+    environment:
+      <<: *app-env
+      CODEX_HOME: /var/wenext/codex-home
+      WENEXT_CODEX_MODEL: ${WENEXT_CODEX_MODEL:-gpt-5.6-terra}
+      WENEXT_CODEX_EFFORT: ${WENEXT_CODEX_EFFORT:-medium}
+      WENEXT_MCP_SIDECAR_CMD: ${WENEXT_MCP_SIDECAR_CMD:-}
+    volumes:
+      - codex-home:/var/wenext/codex-home
+    stdin_open: true    # app-server rozmawia po stdio://
+    healthcheck:
+      # Kontrakt z D12: binarka `codex` z openai-codex-cli-bin ma być na PATH.
+      test: ["CMD-SHELL", "codex --version > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 6
+      start_period: 10s
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+    <<: *logging
+
+  # ===========================================================================
+  # mcp-sidecar — task-scoped read-only MCP (profil `manual`)
+  # ===========================================================================
+  # W produkcji to NIE jest długo żyjący serwis: Control Plane startuje go per
+  # turn i zabija po turnie. Tutaj jest wyłącznie po to, żeby dało się obejrzeć
+  # manifest sześciu narzędzi i uruchomić testy lokalne.
+  # Capability dostaje bezpośrednio od Control Plane, NIGDY z promptu.
+  mcp-sidecar:
+    profiles: [manual]
+    build:
+      context: .
+      dockerfile: services/mcp_sidecar/Dockerfile
+    networks: [capsulenet]
+    environment:
+      <<: [*app-env, *db-env]
+      WENEXT_MCP_MODE: manual-inspect
+      WENEXT_MCP_FAIL_CLOSED: "true"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-wenext}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-wenext}
+    depends_on:
+      db:
+        condition: service_healthy
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+    <<: *logging
+
+  # ===========================================================================
+  # tests — runner suit akceptacyjnych (profil `test`)
+  # ===========================================================================
+  # Wariant kontenerowy jest domyślnym w `make test`, bo `capsulenet` jest
+  # `internal: true` i host NIE dosięgnie kapsuły ani bazy. Wariant hostowy
+  # („z hosta przeciw serwisom compose") wymaga `docker compose exec` dla suit
+  # dotykających kapsuły — patrz NOTES.md.
+  tests:
+    profiles: [test]
+    build:
+      context: .
+      dockerfile: tests/Dockerfile
+    networks: [capsulenet]
+    environment:
+      <<: [*app-env, *db-env]
+      WENEXT_ARTIFACTS_DIR: /var/wenext/artifacts
+      WENEXT_CAPSULE_HOST: capsule
+      WENEXT_GATEWAY_URL: http://gateway:8760
+      WENEXT_FIXTURE_SITE_URL: http://fixture-site:8000
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-wenext}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-wenext}
+      PYTEST_ADDOPTS: ${PYTEST_ADDOPTS:-}
+    volumes:
+      - ./artifacts:/var/wenext/artifacts
+    depends_on:
+      db:
+        condition: service_healthy
+      capsule:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+      fixture-site:
+        condition: service_healthy
+    restart: "no"
+    <<: *logging
+
+  # ===========================================================================
+  # gonogo — generator raportu Go/No-Go (profil `report`)
+  # ===========================================================================
+  # Agreguje wyniki suit, evali, pinów wersji i controls.yaml w raport z czterema
+  # werdyktami. `capsulenet` jest internal, więc nie ma sieci zewnętrznej; bazę
+  # widzi wyłącznie przez DSN roli read-only (rolę zakłada migracja D07).
+  gonogo:
+    profiles: [report]
+    build:
+      context: .
+      dockerfile: tools/gonogo/Dockerfile
+    networks: [capsulenet]
+    environment:
+      <<: *app-env
+      WENEXT_ARTIFACTS_DIR: /var/wenext/artifacts
+      WENEXT_VERSIONS_LOCK: /app/versions.lock.toml
+      WENEXT_CRITERIA: /app/tools/gonogo/criteria.yaml
+      DATABASE_URL_RO: postgresql+asyncpg://${POSTGRES_RO_USER:-wenext_ro}:${POSTGRES_RO_PASSWORD:-wenext_ro}@db:5432/${POSTGRES_DB:-wenext}
+    volumes:
+      - ./artifacts:/var/wenext/artifacts
+      - ./versions.lock.toml:/app/versions.lock.toml:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+    <<: *logging

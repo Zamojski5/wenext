@@ -1,0 +1,29 @@
+# Trzy publikacje tego samego rodzaju, wszystkie bez reakcji.
+id: cisza-po-probie
+nazwa: Powtarzająca się cisza po tym samym ruchu
+wymiary: [trafnosc, zastosowanie_korekty, niepoparte_twierdzenia, koszt]
+sytuacja:
+  spolecznosc: r/devops
+  watek: kto tego używa na produkcji
+  wiek_watku_h: 12
+  konto: wenext_bot
+  zadanie: napisz odpowiedź albo uzasadnij, że nie warto
+pamiec:
+  - rodzaj: EXPERIENCE
+    powiedzial: AGENT
+    tresc: "r/devops: SHORT_ACK, ruch NONE, 300 znaków. Wynik: po 30 godzinach nikt nie zareagował."
+  - rodzaj: EXPERIENCE
+    powiedzial: AGENT
+    tresc: "r/devops: SHORT_ACK, ruch NONE, 280 znaków. Wynik: po 24 godzinach nikt nie zareagował."
+  - rodzaj: EXPERIENCE
+    powiedzial: AGENT
+    tresc: "r/devops: HELP, ruch NUMBER, 800 znaków. Wynik: odpowiedziało 2."
+oczekiwane_zachowanie:
+  opis: >-
+    Zmiana ruchu na ten, który dostał odpowiedzi, albo jawne milczenie; bez zdania
+    „wiadomo, że krótkie potwierdzenia nie działają", bo to trzy przypadki, nie prawo.
+  automat:
+    zakazane_frazy: ["zawsze", "nigdy nie działa", "wiadomo, że"]
+    wymagaj_uzasadnienia: true
+bez_pamieci:
+  opis: Bez pamięci wybór ruchu jest losowy względem tego, co już próbowaliśmy.

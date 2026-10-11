@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Popup — {{ site_name }}{% endblock %}
+{% block page_id %}lab-popup{% endblock %}
+{% block content %}
+<section class="narrow">
+  <h1>Popup i nowa karta</h1>
+  <p class="lead">Trzy sposoby otwarcia drugiego kontekstu przeglądarki.</p>
+  <p>
+    <button id="open-popup" data-testid="open-popup">Otwórz popup (window.open)</button>
+    <button id="open-tab" data-testid="open-tab">Otwórz nową kartę (window.open, _blank)</button>
+  </p>
+  <p><a href="/lab/popup-child" target="_blank" rel="noopener" data-testid="open-anchor">Otwórz przez link target=_blank</a></p>
+  <p class="hint">Dodaj <code>?auto=1</code>, żeby popup otworzył się sam po załadowaniu strony.</p>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+  function openPopup() {
+    window.open('/lab/popup-child', 'wenextPopup', 'width=520,height=420');
+  }
+  document.getElementById('open-popup').addEventListener('click', openPopup);
+  document.getElementById('open-tab').addEventListener('click', function () {
+    window.open('/lab/popup-child', '_blank');
+  });
+  {% if auto %}window.addEventListener('load', openPopup);{% endif %}
+</script>
+{% endblock %}

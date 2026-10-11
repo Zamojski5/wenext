@@ -1,0 +1,154 @@
+{
+  "_opis": "Kontrakt notyfikacji SERWERA app-server, wygenerowany z PRZYPIĘTEJ paczki openai-codex, nie przepisany z dokumentacji. Uzupełnia app-server-methods.json, który opisuje wyłącznie żądania klienta.",
+  "_jak_odtworzyc": "python -m codex_runtime.generate_notification_contract",
+  "wygenerowano_z": {
+    "pakiet": "openai-codex",
+    "wersja": "0.147.0",
+    "moduł": "openai_codex.generated.notification_registry"
+  },
+  "wygenerowano_o": "2026-09-19T12:41:25+00:00",
+  "notyfikacje_sesji": {
+    "thread/started": {
+      "model": "ThreadStartedNotification",
+      "properties": [
+        "thread"
+      ],
+      "required": [
+        "thread"
+      ]
+    },
+    "item/started": {
+      "model": "ItemStartedNotification",
+      "properties": [
+        "item",
+        "startedAtMs",
+        "threadId",
+        "turnId"
+      ],
+      "required": [
+        "item",
+        "startedAtMs",
+        "threadId",
+        "turnId"
+      ]
+    },
+    "item/completed": {
+      "model": "ItemCompletedNotification",
+      "properties": [
+        "completedAtMs",
+        "item",
+        "threadId",
+        "turnId"
+      ],
+      "required": [
+        "completedAtMs",
+        "item",
+        "threadId",
+        "turnId"
+      ]
+    },
+    "item/mcpToolCall/progress": {
+      "model": "McpToolCallProgressNotification",
+      "properties": [
+        "itemId",
+        "message",
+        "threadId",
+        "turnId"
+      ],
+      "required": [
+        "itemId",
+        "message",
+        "threadId",
+        "turnId"
+      ]
+    },
+    "turn/completed": {
+      "model": "TurnCompletedNotification",
+      "properties": [
+        "threadId",
+        "turn"
+      ],
+      "required": [
+        "threadId",
+        "turn"
+      ]
+    },
+    "thread/status/changed": {
+      "model": "ThreadStatusChangedNotification",
+      "properties": [
+        "status",
+        "threadId"
+      ],
+      "required": [
+        "status",
+        "threadId"
+      ]
+    }
+  },
+  "elementy_watku": {
+    "AgentMessageThreadItem": {
+      "properties": [
+        "id",
+        "memoryCitation",
+        "phase",
+        "text",
+        "type"
+      ],
+      "required": [
+        "id",
+        "text",
+        "type"
+      ]
+    },
+    "McpToolCallThreadItem": {
+      "properties": [
+        "appContext",
+        "arguments",
+        "durationMs",
+        "error",
+        "id",
+        "mcpAppResourceUri",
+        "pluginId",
+        "readOnlyHint",
+        "result",
+        "server",
+        "status",
+        "tool",
+        "type"
+      ],
+      "required": [
+        "arguments",
+        "id",
+        "server",
+        "status",
+        "tool",
+        "type"
+      ]
+    },
+    "ReasoningThreadItem": {
+      "properties": [
+        "content",
+        "id",
+        "summary",
+        "type"
+      ],
+      "required": [
+        "id",
+        "type"
+      ]
+    },
+    "UserMessageThreadItem": {
+      "properties": [
+        "clientId",
+        "content",
+        "id",
+        "type"
+      ],
+      "required": [
+        "content",
+        "id",
+        "type"
+      ]
+    }
+  }
+}

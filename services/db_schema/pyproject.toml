@@ -1,0 +1,36 @@
+[project]
+name = "wenext-db-schema"
+version = "0.1.0"
+description = "Migracje i niezmienniki schematu PostgreSQL — E1.F1"
+license = "MIT"
+requires-python = ">=3.12,<3.13"
+dependencies = ["community-os-contracts", "asyncpg>=0.30"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3", "pytest-asyncio>=1.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["db_schema"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+# Declared HERE as well as in the root pyproject.toml: this file is the inifile whenever
+# pytest is started from inside the package, so a marker known only to the root would come
+# out as an unknown-marker warning exactly where it is used.
+markers = [
+    "db: wymaga PostgreSQL (uruchamiane przez tools/dev/run_db_tests.sh)",
+    # Ten sam marker, co w services/control_plane: zestaw regresji P0 zbiera testy z obu pakietów.
+    "p0: regresja P0 (restart, lease, wolna baza, niejednoznaczny submit, widoczność publikacji)",
+    "p2: sesja agenta (schemat 0015)",
+    "p4: obecność bez otwartego dashboardu (schemat 0017)",
+    "p6: macierz platform i współpraca sesji (0019)",
+    "p7: gotowość operacyjna usługi (0020)",
+    "p8: dokumenty projektu nad rejestrem ustaleń (0028)",
+]
+
+[tool.uv.sources]
+community-os-contracts = { workspace = true }

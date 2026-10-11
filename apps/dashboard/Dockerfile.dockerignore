@@ -1,0 +1,30 @@
+# Ignore list for THIS Dockerfile only (BuildKit reads `<dockerfile>.dockerignore` in
+# preference to the context root's `.dockerignore`).
+#
+# Why a second file at all: the repository root `.dockerignore` predates the Node stack and
+# does not mention `node_modules`, `.next` or `.npm-cache`. Without them the build context of
+# this image carries a few hundred megabytes of host-built dependencies — including
+# `@next/swc-darwin-arm64`, a binary that means nothing inside a linux image. The Dockerfile
+# never COPYs them, so this is about the size and the honesty of the context, not correctness
+# of the result.
+#
+# KNOWN COST: this file SUPERSEDES the root one for this build, so an entry added at the root
+# does not reach here. Mirrored below, and worth re-checking whenever the root file changes.
+.git
+.venv
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+artifacts/
+var/
+data/
+profiles/
+codex-home/
+*.log
+ROADMAP_CODEX_CDP_COMMUNITY_OS.v3-backup.md
+
+# The Node additions the root file does not know about.
+**/node_modules
+**/.next
+**/.npm-cache

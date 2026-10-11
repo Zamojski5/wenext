@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block page_id %}index{% endblock %}
+{% block content %}
+<h1>{{ site_name }}</h1>
+<p class="lead">Dwa archetypy kanału i jedno publiczne API nad tą samą treścią.</p>
+
+<section class="cards">
+  <article class="card">
+    <h2>Forum wątkowe</h2>
+    <p class="mode">access_mode: <code>ACCOUNT_REQUIRED</code></p>
+    <p>Zagnieżdżone wątki, głosy, moderacja, wątki zablokowane. {{ thread_count }} wątków.</p>
+    <a class="cta" href="/c">Przejdź do forum</a>
+  </article>
+  <article class="card">
+    <h2>Sieć zawodowa</h2>
+    <p class="mode">access_mode: <code>ACCOUNT_REQUIRED</code></p>
+    <p>Feed postów, płaskie komentarze, reakcje typowane, repost z komentarzem. {{ post_count }} postów.</p>
+    <a class="cta" href="/g">Przejdź do feedu</a>
+  </article>
+  <article class="card">
+    <h2>API publiczne</h2>
+    <p class="mode">access_mode: <code>PUBLIC_API_NO_ACCOUNT</code></p>
+    <p>Ta sama treść bez logowania. Ścieżka tania — planer ma ją preferować.</p>
+    <a class="cta" href="/api/public/">Otwórz API</a>
+  </article>
+</section>
+
+<section>
+  <h2>Społeczności</h2>
+  <ul class="plain">
+    {% for c in communities %}
+      <li><a href="/c/{{ c.slug }}">{{ c.name }}</a> — {{ c.description }}</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endblock %}

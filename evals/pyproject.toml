@@ -1,0 +1,45 @@
+[project]
+name = "wenext-evals"
+version = "0.1.0"
+description = "Eval harness E1.F0 — 30-50 fixture evali: discovery, jakość dyskusji, draft odpowiedzi"
+license = "MIT"
+requires-python = ">=3.12"
+
+# `community-os-contracts` (D21) jest jedyną zależnością runtime. Definicja jakości
+# dyskusji mieszka tam i evale mają jej UŻYWAĆ, nie odtwarzać.
+#
+# Czego tu celowo NIE MA:
+# - `wenext-fixture-site` (D16) — pakiet ciągnie fastapi/uvicorn/jinja2, a evalom
+#   potrzebny jest wyłącznie deterministyczny generator treści (czysty stdlib).
+#   `harness/dataset.py` wstawia `fixtures/site/src` na `sys.path` i importuje
+#   `wenext_fixture_site.generator` bezpośrednio. Zależność jest realna, tylko
+#   rozwiązywana po ścieżce — opisane w NOTES.md.
+# - `wenext-codex-runtime` (D12) — powstaje równolegle. Import jest leniwy i tylko
+#   w ścieżce `@pytest.mark.live`; brak pakietu daje `skip` z powodem, nie błąd kolekcji.
+dependencies = [
+    "community-os-contracts",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3"]
+
+# Ten member NIE jest pakietem instalowalnym. To zbiór testów i danych, a nie
+# biblioteka do dystrybucji — `uv` nie ma czego budować.
+#
+# F4 importuje `evals.scoring.gate_metrics` (open_decision nr 6). Działa to dzięki
+# temu, że `evals/` jest zwykłym pakietem Pythona w korzeniu repo: `evals/__init__.py`
+# istnieje, więc pytest w trybie `prepend` wstawia korzeń repo na `sys.path`.
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+community-os-contracts = { workspace = true }
+
+[tool.pytest.ini_options]
+addopts = "-q"
+markers = [
+    "live: wymaga prawdziwego konta ChatGPT i pakietu D12 (services/codex_runtime/)",
+    "discovery: rodzina evali — wybór wątków z listy kandydatów",
+    "quality: rodzina evali — klasyfikacja jakości dyskusji (22.7)",
+    "draft: rodzina evali — draft odpowiedzi",
+]

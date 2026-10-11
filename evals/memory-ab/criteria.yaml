@@ -1,0 +1,47 @@
+# Kryteria zapisane PRZED pomiarem (P5 etap A).
+#
+# Kolejność ma znaczenie: pierwsze trzy mówią, czy pamięć pomogła, czwarte, czy nie zaczęła
+# szkodzić, piąte, ile to kosztowało. Żadne z nich nie ma jeszcze progu procentowego i to jest
+# decyzja, nie przeoczenie: nie ma ani jednego przebiegu na prawdziwym modelu, więc każdy próg
+# byłby liczbą wymyśloną. Pole `prog` pozostaje `null` do pierwszego pomiaru po wdrożeniu.
+wersja: 1
+zapisano: 2026-09-19
+kryteria:
+  - id: trafnosc
+    nazwa: Trafność decyzji
+    pytanie: >-
+      Czy odpowiedź trafia w to, o co pytał wątek, w ocenie człowieka czytającego oba
+      przebiegi bez informacji, który jest który?
+    pomiar: ocena człowieka, ślepa na przebieg, skala 0-2
+    prog: null
+  - id: zastosowanie_korekty
+    nazwa: Zastosowanie korekty człowieka
+    pytanie: >-
+      Czy przebieg z pamięcią zrobił to, o co człowiek prosił wcześniej (krócej, inaczej,
+      nie w tej społeczności), i czy powiedział, co z tego powodu zmienił?
+    pomiar: sprawdzenie automatyczne na oczekiwanym zachowaniu przypadku plus ocena człowieka
+    prog: null
+  - id: niepoparte_twierdzenia
+    nazwa: Twierdzenia bez pokrycia
+    pytanie: >-
+      Ile zdań stwierdza fakt o świecie bez materiału albo powołuje się na doświadczenie
+      jako na fakt ogólny?
+    pomiar: zliczenie przez człowieka; doświadczenie użyte jako fakt liczy się jako naruszenie
+    prog: null
+  - id: potrzeba_interwencji
+    nazwa: Potrzeba interwencji
+    pytanie: Czy człowiek musiałby wejść i poprawić wynik, zanim cokolwiek by z niego poszło?
+    pomiar: tak/nie na przypadek
+    prog: null
+  - id: koszt
+    nazwa: Koszt
+    pytanie: Ile wywołań narzędzi i ile tur zajął przebieg?
+    pomiar: licznik z ze śladu sesji (session_events)
+    prog: null
+uwagi:
+  - >-
+    Milczenie i krótka reakcja są DOPUSZCZALNYMI wynikami. Przypadek, w którym oczekiwanym
+    zachowaniem jest cisza, zalicza się przez ciszę; harness nie premiuje długości.
+  - >-
+    Porównanie A/B na prawdziwym modelu nie zostało uruchomione. Do tego czasu werdykt tej
+    części brzmi NIE_URUCHOMIONO i nie wolno go zastąpić zerem ani średnią z niczego.

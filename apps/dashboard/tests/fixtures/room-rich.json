@@ -1,0 +1,272 @@
+{
+  "okazje": [
+    {
+      "id": "d1000000-0000-4000-8000-000000000001",
+      "platforma": "REDDIT",
+      "spolecznosc": "r/LocalLLaMA",
+      "tytul": "My coding agent keeps looping on the same failing test. How do you stop it?",
+      "fragment": "Third night in a row it reruns the same pytest command, gets the same error and \"fixes\" it by rewording a comment. I set a max step count but then it just stops with nothing useful. What do you actually do to make it notice it is stuck?",
+      "autor": "ml_tinkerer",
+      "url": "https://www.reddit.com/r/LocalLLaMA/comments/1g8x2k1/my_coding_agent_keeps_looping_on_the_same_failing/",
+      "utworzono": "2026-10-10T10:20:00+00:00",
+      "wynik": 214,
+      "komentarze": 87,
+      "dlaczego": "Opisuje dokładnie ten przypadek, który rozwiązuje Twój kod: agent powtarza to samo nieudane wywołanie. Prosi o praktyczny sposób, nie o teorię.",
+      "kat": "Podziel się jedną konkretną regułą (limit powtórzeń tego samego wywołania) i pokaż, jak to wygląda w śladzie przebiegu.",
+      "stan": "SZKIC",
+      "szkic": "e1000000-0000-4000-8000-000000000001"
+    },
+    {
+      "id": "d1000000-0000-4000-8000-000000000002",
+      "platforma": "REDDIT",
+      "spolecznosc": "r/devops",
+      "tytul": "Anyone else drowning in agent tool call logs? How do you debug a 40 step run?",
+      "fragment": "Our agents call maybe 15 different tools per task and when something goes wrong I am scrolling through a wall of JSON. Is there a sane way to see what happened without reading every line?",
+      "autor": "kube_wrangler",
+      "url": "https://www.reddit.com/r/devops/comments/1g8r44p/anyone_else_drowning_in_agent_tool_call_logs/",
+      "utworzono": "2026-10-10T03:52:00+00:00",
+      "wynik": 58,
+      "komentarze": 31,
+      "dlaczego": "Pyta o czytelny widok przebiegu, a to jest główna funkcja projektu. Wątek ma dużo komentarzy, więc odpowiedź będzie widoczna.",
+      "kat": "Zacznij od tego, co sam robisz przy długim przebiegu, a dopiero potem wspomnij o narzędziu.",
+      "stan": "NOWA",
+      "szkic": null
+    },
+    {
+      "id": "d1000000-0000-4000-8000-000000000003",
+      "platforma": "REDDIT",
+      "spolecznosc": "r/ExperiencedDevs",
+      "tytul": "We shipped an LLM agent to prod and it quietly burned $400 overnight",
+      "fragment": "No alert fired because every single call was technically successful. It just kept calling the same API with slightly different arguments. How are you putting guardrails around cost and retries?",
+      "autor": "throwaway_infra_9",
+      "url": "https://www.reddit.com/r/ExperiencedDevs/comments/1g7z0aa/we_shipped_an_llm_agent_to_prod_and_it_quietly/",
+      "utworzono": "2026-10-09T11:32:00+00:00",
+      "wynik": 402,
+      "komentarze": 143,
+      "dlaczego": "Konkretny koszt i konkretna luka: nic nie zadziałało, bo każde wywołanie było poprawne. Twój kod łapie właśnie takie powtórzenia.",
+      "kat": "Powiedz, jaki sygnał pomógł Ci wychwycić pętlę, i pokaż prosty próg alarmu.",
+      "stan": "SZKIC",
+      "szkic": "e1000000-0000-4000-8000-000000000002"
+    },
+    {
+      "id": "d1000000-0000-4000-8000-000000000004",
+      "platforma": "X",
+      "spolecznosc": null,
+      "tytul": null,
+      "fragment": "Agents do not fail loudly. They fail by confidently doing the wrong thing 30 steps in, and by then you have no idea which step it was.",
+      "autor": "sarah_builds",
+      "url": "https://x.com/sarah_builds/status/1844001122334455667",
+      "utworzono": "2026-10-10T12:27:00+00:00",
+      "wynik": 312,
+      "komentarze": 41,
+      "dlaczego": "Świeży wpis (ponad godzina) z dużym zasięgiem. Opisuje problem ze zdaniem, które można podjąć jedną rzeczową odpowiedzią.",
+      "kat": "Krótka odpowiedź z jednym pomysłem: zapisuj powód każdego kroku, nie tylko jego wynik.",
+      "stan": "SZKIC",
+      "szkic": "e1000000-0000-4000-8000-000000000003"
+    },
+    {
+      "id": "d1000000-0000-4000-8000-000000000005",
+      "platforma": "REDDIT",
+      "spolecznosc": "r/SideProject",
+      "tytul": "Built an agent to triage my inbox. Now I cannot tell if it is actually working",
+      "fragment": "It says it handled 200 emails this week. I spot checked ten and three were wrong. I have no idea how to measure this without reading everything myself.",
+      "autor": "inbox_zero_dad",
+      "url": "https://www.reddit.com/r/SideProject/comments/1g8vq0z/built_an_agent_to_triage_my_inbox/",
+      "utworzono": "2026-10-09T23:32:00+00:00",
+      "wynik": null,
+      "komentarze": 12,
+      "dlaczego": "Autor nie ma sposobu na ocenę pracy agenta. To ten sam problem widziany od strony użytkownika, nie operatora.",
+      "kat": "Zapytaj o próbkę błędów i zaproponuj prosty sposób oceniania: losowe pięć przebiegów dziennie.",
+      "stan": "NOWA",
+      "szkic": null
+    },
+    {
+      "id": "d1000000-0000-4000-8000-000000000006",
+      "platforma": "REDDIT",
+      "spolecznosc": "r/AI_Agents",
+      "tytul": "How are you testing agents before they touch production data?",
+      "fragment": "Unit tests do not mean much when the model output changes every run. Curious what people actually do: replays, golden traces, something else?",
+      "autor": "ship_it_sunday",
+      "url": "https://www.reddit.com/r/AI_Agents/comments/1g8p9b2/how_are_you_testing_agents_before_they_touch/",
+      "utworzono": "2026-10-08T17:32:00+00:00",
+      "wynik": 77,
+      "komentarze": null,
+      "dlaczego": "Pyta o odtwarzanie przebiegów, czyli o funkcję, którą masz. Wątek jest starszy, ale wciąż otwarty.",
+      "kat": "Opisz jeden sposób, który u Ciebie działa, i zaproś do porównania notatek.",
+      "stan": "NOWA",
+      "szkic": null
+    },
+    {
+      "id": "d1000000-0000-4000-8000-000000000007",
+      "platforma": "X",
+      "spolecznosc": null,
+      "tytul": null,
+      "fragment": "Looking for a way to replay an agent run step by step and see why it picked each tool. Does anything like that exist or do I write it myself?",
+      "autor": "devon_ships",
+      "url": "https://x.com/devon_ships/status/1843990011223344556",
+      "utworzono": "2026-10-10T08:12:00+00:00",
+      "wynik": null,
+      "komentarze": null,
+      "dlaczego": "Prosi wprost o narzędzie, które robisz. Brak pomiaru zasięgu, ale to osoba, która szuka rozwiązania teraz.",
+      "kat": "Odpowiedz krótko i podaj link do repozytorium, bez sprzedawania.",
+      "stan": "NOWA",
+      "szkic": null
+    },
+    {
+      "id": "d1000000-0000-4000-8000-000000000008",
+      "platforma": "REDDIT",
+      "spolecznosc": "r/learnprogramming",
+      "tytul": "How do I know my agent is not just guessing?",
+      "fragment": "I am building my first agent and it gives confident answers that are sometimes wrong. How do you tell luck from a working design?",
+      "autor": "first_agent_dev",
+      "url": "https://www.reddit.com/r/learnprogramming/comments/1g8wkk3/how_do_i_know_my_agent_is_not_just_guessing/",
+      "utworzono": "2026-10-10T11:30:00+00:00",
+      "wynik": 19,
+      "komentarze": 8,
+      "dlaczego": "Początkujący, który zadaje dokładnie to pytanie, na które odpowiada projekt. Wątek jest świeży i prawie bez odpowiedzi.",
+      "kat": "Odpowiedz życzliwie, jednym przykładem, bez żargonu.",
+      "stan": "NOWA",
+      "szkic": null
+    },
+    {
+      "id": "d1000000-0000-4000-8000-000000000009",
+      "platforma": "REDDIT",
+      "spolecznosc": "r/programming",
+      "tytul": "Postmortem: our support agent promised refunds it could not give",
+      "fragment": "A long write-up of how an agent invented a policy and nobody noticed for six days.",
+      "autor": "oncall_oracle",
+      "url": "https://www.reddit.com/r/programming/comments/1g6d3d9/postmortem_our_support_agent_promised_refunds/",
+      "utworzono": "2026-10-07T09:32:00+00:00",
+      "wynik": 1180,
+      "komentarze": 260,
+      "dlaczego": "Duży wątek o błędzie agenta w produkcji.",
+      "kat": "Odpowiedziano trzy dni temu.",
+      "stan": "ODPOWIEDZIANO",
+      "szkic": null
+    },
+    {
+      "id": "d1000000-0000-4000-8000-000000000010",
+      "platforma": "REDDIT",
+      "spolecznosc": "r/LangChain",
+      "tytul": "Is there a standard way to cap agent retries?",
+      "fragment": "Every framework seems to have its own approach.",
+      "autor": "retry_rita",
+      "url": "https://www.reddit.com/r/LangChain/comments/1g5aa00/is_there_a_standard_way_to_cap_agent_retries/",
+      "utworzono": "2026-10-06T13:32:00+00:00",
+      "wynik": 23,
+      "komentarze": 9,
+      "dlaczego": "Pytanie ogólne, bez konkretnego problemu.",
+      "kat": "Pominięta: zbyt ogólne.",
+      "stan": "POMINIETA",
+      "szkic": null
+    }
+  ],
+  "szkice": [
+    {
+      "revision_id": "e1000000-0000-4000-8000-000000000001",
+      "okazja_id": "d1000000-0000-4000-8000-000000000001",
+      "platforma": "REDDIT",
+      "spolecznosc": "r/LocalLLaMA",
+      "rodzaj": "REPLY",
+      "tytul": null,
+      "tekst": "What helped me most was making \"stuck\" a thing the harness can see, instead of something the model has to notice. I hash the tool name plus its arguments and count repeats inside a sliding window. At three identical calls the run pauses and hands the last five steps to a human (or to a second model with a different prompt) instead of retrying.\n\nA hard step cap alone just gives you a silent stop, like you saw. The useful part is that the stop comes with the trace of why.\n\nI put my version in a small open source tool, happy to share it if that is useful.",
+      "w_odpowiedzi_na": {
+        "url": "https://www.reddit.com/r/LocalLLaMA/comments/1g8x2k1/my_coding_agent_keeps_looping_on_the_same_failing/",
+        "tytul": "My coding agent keeps looping on the same failing test. How do you stop it?",
+        "autor": "ml_tinkerer"
+      },
+      "stan": "READY_FOR_APPROVAL",
+      "wygasa": "2026-10-11T11:32:00+00:00"
+    },
+    {
+      "revision_id": "e1000000-0000-4000-8000-000000000002",
+      "okazja_id": "d1000000-0000-4000-8000-000000000003",
+      "platforma": "REDDIT",
+      "spolecznosc": "r/ExperiencedDevs",
+      "rodzaj": "REPLY",
+      "tytul": null,
+      "tekst": "The painful part of your story is that every call succeeded, so nothing a normal alert watches ever fired. What caught the same pattern for us was alerting on repetition rather than on errors: the same tool with near identical arguments more than N times in a run, or spend per run over a multiple of the median.\n\nBoth are a few lines on top of whatever tracing you already have.",
+      "w_odpowiedzi_na": {
+        "url": "https://www.reddit.com/r/ExperiencedDevs/comments/1g7z0aa/we_shipped_an_llm_agent_to_prod_and_it_quietly/",
+        "tytul": "We shipped an LLM agent to prod and it quietly burned $400 overnight",
+        "autor": "throwaway_infra_9"
+      },
+      "stan": "READY_FOR_APPROVAL",
+      "wygasa": "2026-10-10T18:42:00+00:00"
+    },
+    {
+      "revision_id": "e1000000-0000-4000-8000-000000000003",
+      "okazja_id": "d1000000-0000-4000-8000-000000000004",
+      "platforma": "X",
+      "spolecznosc": null,
+      "rodzaj": "REPLY",
+      "tytul": null,
+      "tekst": "What fixed this for me: log the reason for each step, not only the result. When a run goes sideways you can find the step where the stated reason stopped matching the task, usually long before the visible failure.",
+      "w_odpowiedzi_na": {
+        "url": "https://x.com/sarah_builds/status/1844001122334455667",
+        "tytul": "Agents do not fail loudly. They fail by confidently doing the wrong thing 30 steps in, and by then you have no idea which step it was.",
+        "autor": "sarah_builds"
+      },
+      "stan": "READY_FOR_APPROVAL",
+      "wygasa": "2026-10-12T05:32:00+00:00"
+    },
+    {
+      "revision_id": "e1000000-0000-4000-8000-000000000004",
+      "okazja_id": null,
+      "platforma": "REDDIT",
+      "spolecznosc": "r/devops",
+      "rodzaj": "OWN_POST",
+      "tytul": "What we learned after our agent looped for six hours: a checklist for stuck runs",
+      "tekst": "Last month one of our agents repeated the same tool call 1,100 times before anyone noticed. No errors, no alerts, just a bill.\n\nHere is the checklist we use now:\n\n1. Count identical tool calls per run and pause at three.\n2. Keep the reason for each step next to its result.\n3. Alert on spend per run, not only on errors.\n\nHappy to share the small tool we use for 1 and 2 if anyone wants it.",
+      "w_odpowiedzi_na": null,
+      "stan": "READY_FOR_APPROVAL",
+      "wygasa": "2026-10-13T15:32:00+00:00"
+    }
+  ],
+  "wyniki": {
+    "okno_dni": 7,
+    "opublikowane": 5,
+    "odpowiedzi": 9,
+    "glosy": 87,
+    "usuniete": 1,
+    "pozycje": [
+      {
+        "url": "https://www.reddit.com/r/LocalLLaMA/comments/1g6xx11/_/lm3k9ab/",
+        "platforma": "REDDIT",
+        "tekst": "A hard cap on identical tool calls plus a pause that hands over the last five steps. That turned our silent stops into something we could debug.",
+        "widocznosc": "WIDOCZNA",
+        "glosy": 41,
+        "odpowiedzi": 6,
+        "opublikowano": "2026-10-09T10:32:00+00:00"
+      },
+      {
+        "url": "https://www.reddit.com/r/devops/comments/1g6q2c2/_/lm2p0xy/",
+        "platforma": "REDDIT",
+        "tekst": "We alert on repetition instead of errors: same tool, near identical arguments, more than N times in a run.",
+        "widocznosc": "WIDOCZNA",
+        "glosy": 38,
+        "odpowiedzi": 3,
+        "opublikowano": "2026-10-08T06:32:00+00:00"
+      },
+      {
+        "url": "https://x.com/wenext_dev/status/1843201112223334445",
+        "platforma": "X",
+        "tekst": "Log the reason for each step, not only the result. That is where the drift shows up first.",
+        "widocznosc": null,
+        "glosy": null,
+        "odpowiedzi": null,
+        "opublikowano": "2026-10-09T17:32:00+00:00"
+      },
+      {
+        "url": "https://www.reddit.com/r/AI_Agents/comments/1g5m7d0/_/lm0aa11/",
+        "platforma": "REDDIT",
+        "tekst": "Replaying a run from the saved trace is how we test: same inputs, compare tool choices step by step.",
+        "widocznosc": "USUNIETA",
+        "glosy": null,
+        "odpowiedzi": null,
+        "opublikowano": "2026-10-06T11:32:00+00:00"
+      }
+    ]
+  },
+  "pokoj": "/w/aaaaaaaa-0000-4000-8000-000000000001/p/bbbbbbbb-0000-4000-8000-000000000001/room"
+}

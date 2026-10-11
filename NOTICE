@@ -1,0 +1,49 @@
+Wenext
+Copyright (c) 2026 Maurycy Zamojski. Released under the MIT License (see LICENSE).
+
+This repository contains, builds on, or downloads the third-party material below. It keeps
+its own license; the MIT license of this repository does not replace it.
+
+1. Fonts: Inter and Manrope
+
+   apps/dashboard/public/fonts/ holds woff2 subsets of two typefaces used by the dashboard.
+
+   - Inter. Copyright (c) 2016 The Inter Project Authors (https://github.com/rsms/inter)
+   - Manrope. Copyright 2018 The Manrope Project Authors (https://github.com/googlefonts/manrope)
+
+   Both are licensed under the SIL Open Font License, Version 1.1. The license texts sit next to
+   the files: apps/dashboard/public/fonts/OFL-Inter.txt and OFL-Manrope.txt.
+
+2. Codex app-server protocol contract
+
+   services/codex_runtime/codex_runtime/contract/*.json are JSON Schema files produced by
+   `codex app-server generate-json-schema` from a pinned build of the Codex CLI
+   (https://github.com/openai/codex). They derive from that project's protocol definitions,
+   which are licensed under the Apache License, Version 2.0
+   (https://www.apache.org/licenses/LICENSE-2.0). They are kept in this repository to pin the
+   interface the code is written against. To regenerate them, run
+   `python -m codex_runtime.generate_contract` from services/codex_runtime.
+
+3. noVNC (downloaded, not included)
+
+   infra/novnc/fetch_novnc.py downloads the release pinned in versions.lock.toml, and checks its
+   SHA-256, while the stream gateway image is built. noVNC (https://github.com/novnc/noVNC) is
+   licensed mainly under the Mozilla Public License 2.0, with some files under other licenses;
+   see its repository.
+
+4. Chrome for Testing (downloaded, not included)
+
+   infra/browser/fetch_chrome.py downloads the pinned build for the browser capsule image. It is
+   Google's software, under its own terms, and is not part of this repository.
+
+5. Name and mark
+
+   The software in this repository is MIT licensed. The name "Wenext" and the mark in
+   apps/dashboard/public/brand/mark-white.png identify this project; the MIT license does not
+   grant a right to use them as the name or logo of a different product. A fork should use its
+   own name and mark.
+
+6. Dependencies
+
+   Python and npm packages are installed from their registries under their own licenses; the
+   resolved sets are in uv.lock and apps/dashboard/package-lock.json.

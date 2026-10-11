@@ -1,0 +1,95 @@
+# Kryteria trzech bramek Go/No-Go fazy E1.F0.
+#
+# Definition of Done (L5181): "zapadły trzy osobne Go/No-Go: headless CDP contract,
+# headful exception path, Codex jako marketing runtime".
+#
+# ZASADA, KTÓREJ NIE WOLNO ZŁAMAĆ:
+# Progi są zapisane PRZED uruchomieniem pomiaru. To jest ta sama reguła, co zamrożenie
+# progów bramki E1 przed startem okna (L4303, L4619) — zastosowana o pięć faz wcześniej.
+# Zmiana progu po zobaczeniu wyników musi być widoczna w historii tego pliku i musi
+# unieważniać bieżący wynik bramki.
+
+wersja: 1
+zamrozone_dnia: "2026-08-30"
+
+bramki:
+  # ---------------------------------------------------------------------------
+  GATE-1:
+    nazwa: "Kontrakt headless CDP"
+    pytanie: >-
+      Czy kontrakt headless CDP działa dla przypiętego builda przeglądarki — łącznie
+      z persistent contextem, locatorami, popupami, screenshotami, traces, ponownym
+      dołączeniem Gatewaya, odrzuceniem niezgodnego builda, bezpieczną obsługą stale
+      DevToolsActivePort i brakiem publicznego CDP?
+    zrodlo_dowodu: "artifacts/gate1/cdp-contract.json"
+    wymaga_czlowieka: false
+    prog: >-
+      WSZYSTKIE kontrole zdane. Kontrakt jest binarny — częściowo działający CDP
+      oznacza, że adapter będzie działał częściowo, a to jest gorsze niż NO_GO.
+    kontrole_wymagane:
+      - persistent_context
+      - locatory
+      - popupy
+      - screenshoty
+      - traces
+      - reattach_gatewaya
+      - zgodnosc_builda
+      - stale_devtools_port
+      - kanoniczne_argumenty
+      - brak_publicznego_cdp
+
+  # ---------------------------------------------------------------------------
+  GATE-2:
+    nazwa: "Ścieżka wyjątkowa headful"
+    pytanie: >-
+      Czy profil zalogowany w trybie headful jest używany przez headless bez ponownego
+      loginu i bez kopiowania cookies, czy przejście trybu przechodzi przez SAFE_STOP,
+      i czy lista powodów headful jest faktycznie zamknięta?
+    zrodlo_dowodu: "artifacts/gate2/headful-handoff.json"
+    wymaga_czlowieka: false
+    prog: >-
+      Przekazanie profilu w obie strony bez utraty sesji, przejście trybu tworzy nową
+      browser_session i audit event, powód spoza zamkniętej listy jest odrzucany.
+    kontrole_wymagane:
+      - headful_startuje_na_tym_samym_profilu
+      - sesja_przezywa_przelaczenie_do_headless
+      - brak_kopiowania_cookies
+      - powod_spoza_listy_odrzucony
+      - przejscie_trybu_tworzy_nowa_sesje
+
+  # ---------------------------------------------------------------------------
+  GATE-3:
+    nazwa: "Codex jako marketing runtime"
+    pytanie: >-
+      Czy Codex logowany kontem ChatGPT wytrzymuje wielogodzinną pracę bez nadzoru,
+      czy przypięty SDK wystawia wymagane model/effort/output schema, czy cztery role
+      wątków są izolowane i czy shell/exec są niedostępne?
+    zrodlo_dowodu: "artifacts/gate3/codex-runtime.json"
+    # TA BRAMKA WYMAGA CZŁOWIEKA. Bez konta ChatGPT nie da się jej rozstrzygnąć
+    # i żaden wynik zastępczy nie jest dopuszczalny.
+    wymaga_czlowieka: true
+    uruchamiane_przez: "make codex-gonogo"
+    prog: >-
+      Kontrakt SDK potwierdzony na przypiętej wersji, cztery role w osobnych wątkach,
+      shell i unified_exec niedostępne, model/list spaginowany do końca.
+      Wielogodzinna praca bez nadzoru potwierdzona ALBO jawnie odrzucona jako NO_GO —
+      brak potwierdzenia NIE jest wynikiem pozytywnym.
+    kontrole_wymagane:
+      - sdk_wystawia_model_effort_schema
+      - model_list_pelna_paginacja
+      - cztery_role_w_osobnych_watkach
+      - brak_shell_i_exec
+      - tylko_dozwolony_mcp
+      - unattended_rozstrzygniete
+
+# Progi evali fixture (L5168: "30-50 fixture evals").
+# Zamrożone przed pierwszym uruchomieniem `make evals-live`.
+evale:
+  minimalna_liczba_przypadkow: 30
+  maksymalna_liczba_przypadkow: 50
+  prog_zdawalnosci: 0.0
+  uwaga: >-
+    W F0 evale dowodzą, że HARNESS DZIAŁA i że definicja jakości jest zakodowana —
+    nie że model osiąga jakiś poziom. Próg jakości predykcyjnej należy do F3 i F6
+    i nie wolno go tu ustawiać, bo nie ma jeszcze ground truth (L5514).
+    Dlatego `prog_zdawalnosci` wynosi 0.0 i jest to decyzja, nie przeoczenie.

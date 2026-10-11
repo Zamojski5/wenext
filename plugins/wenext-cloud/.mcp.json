@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "wenext": {
+      "type": "http",
+      "url": "https://getwenext.com/mcp"
+    }
+  }
+}

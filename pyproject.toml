@@ -1,0 +1,77 @@
+[project]
+name = "wenext"
+version = "0.1.0"
+description = "Wenext: finds the first users for what you built, from inside Codex or Claude Code"
+license = "MIT"
+requires-python = ">=3.12,<3.13"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=1.0",
+    "ruff>=0.9",
+]
+
+# ---------------------------------------------------------------------------
+# Workspace uv
+# ---------------------------------------------------------------------------
+# Każdy member ma własny pyproject.toml i własne zależności. Korzeń nie ma
+# zależności runtime celowo — nie chcemy, żeby instalacja jednego serwisu
+# ciągnęła zależności wszystkich pozostałych.
+#
+# `contracts` jest członkiem, od którego zależą prawie wszyscy. Nie odwrotnie:
+# contracts nie zależy od niczego poza pydantic.
+[tool.uv.workspace]
+# Lista zawiera WYŁĄCZNIE katalogi, które już istnieją. `uv lock` zawodzi na członku
+# bez pyproject.toml, więc wpisanie tu przyszłych deliverables blokuje cały workspace
+# wszystkim pozostałym. Dopisujemy `evals` i `tests`, gdy powstaną (D17, D18).
+members = [
+    "contracts",
+    "services/*",
+    "fixtures/site",
+    "tools/gonogo",
+    "tests",
+    "evals",
+]
+
+[tool.uv]
+required-version = ">=0.9.0"
+
+[tool.uv.sources]
+community-os-contracts = { workspace = true }
+
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+# `node_modules` and `.next` are listed BEFORE the Next.js dashboard of D-014 exists. Linting
+# dependency code the repository never wrote produces findings nobody can act on, and the same
+# two names are in `IGNORED_DIRS` in tests/test_repo_consistency.py, where their absence was
+# measured to break three scanners.
+extend-exclude = [".venv", "artifacts", "var", "node_modules", ".next"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+    # Komunikaty błędów po polsku bywają długie i wielolinijkowe; to celowe.
+    "EM101", "EM102", "TRY003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Testy mają prawo do długich, opisowych asercji.
+"**/tests/**" = ["E501"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+addopts = "-q"
+markers = [
+    "live: wymaga prawdziwego konta ChatGPT albo prawdziwego konta social (D20)",
+    "capsule: wymaga uruchomionej kapsuły z Chrome for Testing",
+    "db: wymaga PostgreSQL",
+    # Rodziny evali (D17). Zadeklarowane TU, a nie tylko w evals/pyproject.toml, bo przy
+    # `pytest tests evals` rootdirem jest korzeń repo i to ta konfiguracja obowiązuje.
+    "discovery: eval rodziny discovery",
+    "quality: eval klasyfikacji jakości dyskusji",
+    "draft: eval draftu odpowiedzi",
+]

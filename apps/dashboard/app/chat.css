@@ -1,0 +1,732 @@
+/*
+ * Widok rozmowy i przebieg pracy agenta, PRZEPISANE 1:1 Z MAKIET (D-046).
+ *
+ * ŹRÓDŁO I SPOSÓB PRZENIESIENIA. Reguły niżej pochodzą z dwóch plików przyjętych przez
+ * założyciela 20.09 jako wzorzec: `docs/produkt/prototyp/chat-inline-actions.html` i
+ * `agent-progress-detail.html`. Zostały z nich wzięte MASZYNOWO, przez podmianę selektora
+ * korzenia (`#inline-studio` na `.st-chat-view`, `#agent-motion-preview` na `.ap-progress`)
+ * i nic poza tym. Powód takiej roboty zamiast przepisywania ręcznego: odbiór jest 1:1, a
+ * ręczne przepisanie 150 reguł to sto pięćdziesiąt okazji do drobnej różnicy, której nikt nie
+ * zobaczy na przeglądzie, a która widać przy porównaniu zrzutów.
+ *
+ * DLACZEGO OSOBNY PLIK, A NIE `studio.css`. Makieta ma własne wartości tokenów o tych samych
+ * nazwach, co Studio: `--st-line` to tu `#252525` zamiast `rgba(255,255,255,.05)`, `--st-radius`
+ * to 14px zamiast 12px, `--st-ink` to `#f0f0ed` zamiast `#f3f3f1`. Wpisanie ich globalnie
+ * przemalowałoby każdy ekran produktu przy okazji zmiany dotyczącej jednego. Tokeny są więc
+ * przedefiniowane W KORZENIU WIDOKU ROZMOWY i obowiązują wyłącznie pod nim.
+ *
+ * CO TU ŚWIADOMIE ZOSTAŁO Z MAKIETY, CHOĆ W PRODUKCIE ZNACZY CO INNEGO: `.st-demo` (napis
+ * „Demo" w nagłówku makiety) nie jest używane przez żaden komponent Studia i zostaje wyłącznie
+ * po to, żeby porównanie zrzutów 1:1 dotyczyło tego samego arkusza. Gdyby ktoś je kiedyś
+ * wyrenderował, na ekranie produktu stanąłby napis „Demo", więc nie ma go w żadnym komponencie.
+ *
+ * DWA KORZENIE, NIE JEDEN: `:is(.st-chat-view, .st-cards-host)` (E2, 20.09 wieczorem).
+ *
+ * Pierwszy to widok rozmowy. Drugi jest dla ekranu, który pokazuje KARTY POZA ROZMOWĄ — dziś
+ * „Społeczności" projektu. Bez niego karta wyrenderowana gdzie indziej nie dostaje ani jednej
+ * reguły stąd ANI tokenów z korzenia, więc wychodzi surowy HTML: napisy jeden na drugim, tak
+ * jak na `output/porownanie-1-1/studio-0-przed-poprawka-kart.jpg`. To jest dokładnie ta sama
+ * usterka, co tamta („kontekst nie jest częścią skopiowanego fragmentu"), tylko po stronie
+ * arkusza: komponent przeniesiony na inny ekran zabiera ze sobą klasy, a nie to, w czym stały.
+ *
+ * Dlaczego nie `.st-chat-view` na tamtym ekranie: to jest nazwa WIDOKU ROZMOWY, a ekran
+ * społeczności rozmową nie jest; klasa kłamałaby o tym, co tam stoi, a układ wątku (szerokość
+ * kolumny, odstęp od góry) wjechałby razem z nią. Dlaczego nie kopia reguł: kopia rozjeżdża się
+ * cicho. `:is()` nie zmienia swoistości, bo oba argumenty są klasami, więc porównanie 1:1
+ * widoku rozmowy z makietą zostaje nietknięte.
+ *
+ * ZMIANY WZGLĘDEM MAKIETY SĄ WYPISANE NA KOŃCU PLIKU, w jednym bloku, z powodem przy każdej.
+ */
+
+/*
+ * Inter, z plików w repozytorium, nie z sieci.
+ *
+ * JEDEN PLIK NA CAŁY ZAKRES GRUBOŚCI, i to nie jest skrót. Google Fonts oddaje dla 400, 500 i
+ * 600 DOKŁADNIE TEN SAM plik zmienny: sprawdzone sumą SHA-256, trzy odciski były identyczne.
+ * Sześć plików zamiast dwóch znaczyłoby 267 kB pobierane zamiast 134 kB i trzy wpisy, które
+ * przy pierwszej aktualizacji rozjadą się o jedną wersję. Dlatego `font-weight: 400 600` na
+ * dwóch plikach: przeglądarka bierze z nich grubość z zakresu, bo to jest font zmienny.
+ *
+ * Podział na `latin` i `latin-ext` jest z tego samego powodu, co przy Manrope: polskie znaki
+ * siedzą w `latin-ext` i bez tego pliku „ą" rysuje się zastępczym krojem, co widać w jednym
+ * zdaniu na pięć.
+ */
+@font-face {
+  font-family: "Inter Studio";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("/fonts/inter-400-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Inter Studio";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("/fonts/inter-400-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* ---------- rozmowa (chat-inline-actions.html) ---------- */
+
+:is(.st-chat-view, .st-cards-host){--st-bg:#080808;--st-panel:#141414;--st-raised:#202020;--st-ink:#f0f0ed;--st-muted:#90908e;--st-line:#252525;--st-radius:14px;--st-duration:320ms;color-scheme:dark;background:var(--st-bg);color:var(--st-ink);font-family:"Inter Studio",Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:14px;line-height:1.6;border-radius:20px;isolation:isolate;width:100%;overflow:visible;-webkit-font-smoothing:antialiased}
+:is(.st-chat-view, .st-cards-host) *{box-sizing:border-box}
+:is(.st-chat-view, .st-cards-host) [hidden]{display:none!important}
+:is(.st-chat-view, .st-cards-host) button,:is(.st-chat-view, .st-cards-host) textarea{font:inherit;color:inherit}
+:is(.st-chat-view, .st-cards-host) button{border:0;background:transparent;transition:background var(--st-duration),color var(--st-duration),transform var(--st-duration);font-size:12px;line-height:1.4}
+:is(.st-chat-view, .st-cards-host) button:active:not(:disabled){transform:scale(.97)}
+:is(.st-chat-view, .st-cards-host) button:disabled{cursor:default}
+:is(.st-chat-view, .st-cards-host) svg{width:15px;height:15px;stroke-width:1.5;flex-shrink:0}
+:is(.st-chat-view, .st-cards-host) .st-top{height:60px;padding:0 25px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #ffffff06}
+:is(.st-chat-view, .st-cards-host) .st-brand{width:25px;height:24px;object-fit:contain}
+:is(.st-chat-view, .st-cards-host) .st-crumb{display:flex;align-items:center;gap:9px;font-size:12px;color:var(--st-muted)}
+:is(.st-chat-view, .st-cards-host) .st-crumb b{font-weight:400;color:#d9d9d6}
+:is(.st-chat-view, .st-cards-host) .st-demo{margin-left:auto;color:#858583;font-size:11px;letter-spacing:.04em}
+:is(.st-chat-view, .st-cards-host) .st-thread{padding:30px 36px 22px;max-width:670px;margin:auto}
+:is(.st-chat-view, .st-cards-host) .st-user{margin:0 0 31px auto;max-width:86%;width:fit-content;background:#1c1c1c;padding:12px 16px;border-radius:17px 17px 4px 17px;font-size:13px;color:#e6e6e2;line-height:1.65}
+:is(.st-chat-view, .st-cards-host) .st-agent{padding:0;margin:0 0 16px;color:#e2e2de;font-size:14px;max-width:480px}
+:is(.st-chat-view, .st-cards-host) .st-account{position:relative;display:flex;align-items:center;gap:11px;padding:12px 13px;background:var(--st-panel);border-radius:var(--st-radius);max-width:420px;margin:0 0 15px;transition:background var(--st-duration)}
+:is(.st-chat-view, .st-cards-host) .st-account.connected{background:transparent;padding:5px 0 7px}
+:is(.st-chat-view, .st-cards-host) .st-avatar{width:30px;height:30px;border-radius:50%;background:#272727;display:grid;place-items:center;font-size:11px;color:#d5d5d0;flex-shrink:0}
+:is(.st-chat-view, .st-cards-host) .st-account-copy{flex:1;min-width:0;display:flex;flex-direction:column;gap:0;font-size:12px;line-height:1.5}
+:is(.st-chat-view, .st-cards-host) .st-account-copy small{color:var(--st-muted);font-size:11px}
+:is(.st-chat-view, .st-cards-host) .st-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:31px;padding:8px 11px;border-radius:8px;white-space:nowrap;background:#ececea;color:#111}
+:is(.st-chat-view, .st-cards-host) .st-button:hover{background:#fff}
+:is(.st-chat-view, .st-cards-host) .st-soft{background:#242424;color:#dededb}
+:is(.st-chat-view, .st-cards-host) .st-soft:hover{background:#303030}
+:is(.st-chat-view, .st-cards-host) .st-text{padding:5px 0;color:#a5a5a0;display:inline-flex;align-items:center;gap:6px}
+:is(.st-chat-view, .st-cards-host) .st-text:hover{color:#f3f3ef}
+:is(.st-chat-view, .st-cards-host) .st-connected{display:flex;align-items:center;gap:5px;color:#aaa9a4;font-size:11px}
+:is(.st-chat-view, .st-cards-host) .st-popover{position:absolute;right:0;top:calc(100% + 7px);width:263px;max-width:100%;padding:16px;background:#1a1a1a;border:1px solid #2e2e2e;box-shadow:0 12px 35px #0009;border-radius:14px;z-index:20;transform-origin:top right;animation:st-enter var(--st-duration) cubic-bezier(.2,.8,.2,1) both}
+:is(.st-chat-view, .st-cards-host) .st-pophead{display:flex;justify-content:space-between;align-items:center;font-size:13px;margin-bottom:13px}
+:is(.st-chat-view, .st-cards-host) .st-icon{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:7px;color:#8f8f8b}
+:is(.st-chat-view, .st-cards-host) .st-icon:hover{background:#ffffff09;color:#fff}
+:is(.st-chat-view, .st-cards-host) .st-popprofile{display:flex;gap:10px;align-items:center;margin-bottom:16px;font-size:12px}
+:is(.st-chat-view, .st-cards-host) .st-popprofile small{display:block;color:var(--st-muted);font-size:11px}
+:is(.st-chat-view, .st-cards-host) .st-popover .st-button{width:100%}
+:is(.st-chat-view, .st-cards-host) .st-work{margin:4px 0 16px}
+:is(.st-chat-view, .st-cards-host) .st-work-toggle{padding:5px 0;display:flex;align-items:center;gap:9px;color:var(--st-muted);max-width:100%;text-align:left;min-height:30px}
+:is(.st-chat-view, .st-cards-host) .st-indicator{position:relative;width:22px;height:21px;flex-shrink:0;display:grid;place-items:center}
+:is(.st-chat-view, .st-cards-host) .st-indicator img{width:22px;height:20px;object-fit:contain}
+:is(.st-chat-view, .st-cards-host) .st-motion,:is(.st-chat-view, .st-cards-host) .st-orbs{display:none}
+:is(.st-chat-view, .st-cards-host).is-working .st-motion{display:block}
+:is(.st-chat-view, .st-cards-host).is-working .st-still{display:none}
+:is(.st-chat-view, .st-cards-host) .st-work-label{font-size:12px;display:inline-block}
+:is(.st-chat-view, .st-cards-host).is-working .st-work-label{background:linear-gradient(100deg,#83837f 30%,#ecece5 48%,#83837f 66%);background-size:250% 100%;background-clip:text;-webkit-background-clip:text;color:transparent;animation:st-shimmer 3s ease-in-out infinite}
+:is(.st-chat-view, .st-cards-host) .st-chevron{width:12px;height:12px;color:#70706c;transition:transform var(--st-duration)}
+:is(.st-chat-view, .st-cards-host) .st-work-toggle[aria-expanded=true] .st-chevron{transform:rotate(90deg)}
+:is(.st-chat-view, .st-cards-host) .st-tasklist{padding:7px 0 0 32px;display:grid;gap:8px;font-size:12px;color:#93938e;animation:st-enter var(--st-duration) both}
+:is(.st-chat-view, .st-cards-host) .st-task{display:flex;align-items:center;gap:9px}
+:is(.st-chat-view, .st-cards-host) .st-task-dot{display:block;width:5px;height:5px;border-radius:50%;background:#666;flex-shrink:0;margin:0 4px}
+:is(.st-chat-view, .st-cards-host) .st-task.running{color:#deded7}
+:is(.st-chat-view, .st-cards-host) .st-task.running .st-task-dot{background:#d4d4cc;box-shadow:0 0 8px #fff4;animation:st-breathe 1.8s ease-in-out infinite}
+:is(.st-chat-view, .st-cards-host) .st-task.done{color:#83837f}
+:is(.st-chat-view, .st-cards-host) .st-task.done svg{width:13px;height:13px}
+:is(.st-chat-view, .st-cards-host) .st-results{animation:st-enter 480ms cubic-bezier(.2,.8,.2,1) both;margin:17px 0 0}
+:is(.st-chat-view, .st-cards-host) .st-results-intro{font-size:13px;margin:0 0 14px;color:#d9d9d5;max-width:440px}
+:is(.st-chat-view, .st-cards-host) .st-communities{background:var(--st-panel);border-radius:var(--st-radius);padding:0 13px;max-width:450px}
+:is(.st-chat-view, .st-cards-host) .st-community{display:grid;grid-template-columns:1fr auto;gap:9px;align-items:center;padding:13px 0}
+:is(.st-chat-view, .st-cards-host) .st-community + .st-community{border-top:1px solid #ffffff07}
+:is(.st-chat-view, .st-cards-host) .st-community-info{min-width:0}
+:is(.st-chat-view, .st-cards-host) .st-community-title{padding:0;display:flex;align-items:center;gap:7px;text-align:left;font-size:12px;color:#eeeeea;min-height:21px}
+:is(.st-chat-view, .st-cards-host) .st-community-title svg{color:#73736f;width:12px;height:12px}
+:is(.st-chat-view, .st-cards-host) .st-community small{font-size:11px;color:var(--st-muted);display:block;margin-top:2px}
+:is(.st-chat-view, .st-cards-host) .st-join{min-width:78px}
+:is(.st-chat-view, .st-cards-host) .st-joined{background:transparent;color:#a7a7a0;min-width:78px;padding:8px 0}
+:is(.st-chat-view, .st-cards-host) .st-joined:hover{background:transparent}
+:is(.st-chat-view, .st-cards-host) .st-community-detail{grid-column:1/-1;font-size:12px;color:#a3a39e;padding:5px 0 3px;animation:st-enter var(--st-duration) both}
+:is(.st-chat-view, .st-cards-host) .st-autonomy{margin-top:9px;font-size:11px;color:#8e8e88;display:flex;align-items:center;gap:7px}
+:is(.st-chat-view, .st-cards-host) .st-autonomy .st-text{font-size:11px}
+:is(.st-chat-view, .st-cards-host) .st-draft{margin-top:17px;max-width:450px;border-radius:var(--st-radius);background:var(--st-panel);animation:st-enter 400ms both}
+:is(.st-chat-view, .st-cards-host) .st-draft-head{display:flex;align-items:center;gap:9px;padding:13px;font-size:12px}
+:is(.st-chat-view, .st-cards-host) .st-draft-head>svg{color:#9e9e98}
+:is(.st-chat-view, .st-cards-host) .st-draft-head>span{flex:1}
+:is(.st-chat-view, .st-cards-host) .st-draft-head small{display:block;color:#93938c;font-size:11px}
+:is(.st-chat-view, .st-cards-host) .st-draft-body{padding:0 14px 13px;animation:st-enter var(--st-duration) both}
+:is(.st-chat-view, .st-cards-host) .st-draft-text{color:#c7c7c0;font-size:12px;line-height:1.7;margin:0 0 12px}
+:is(.st-chat-view, .st-cards-host) .st-draft-actions{display:flex;align-items:center;justify-content:flex-end;gap:13px}
+:is(.st-chat-view, .st-cards-host) .st-edit{width:100%;min-height:105px;padding:10px;border:1px solid #333;background:#101010;border-radius:8px;resize:vertical;font-size:12px;margin-bottom:9px}
+:is(.st-chat-view, .st-cards-host) .st-followup{margin-top:17px}
+:is(.st-chat-view, .st-cards-host) .st-followup .st-user{margin-bottom:16px}
+:is(.st-chat-view, .st-cards-host) .st-reply{font-size:13px;color:#b8b8b1;margin:0 0 14px}
+:is(.st-chat-view, .st-cards-host) .st-footer{padding:0 36px 23px;max-width:670px;margin:auto}
+:is(.st-chat-view, .st-cards-host) .st-suggest{padding:0 0 10px;display:flex}
+:is(.st-chat-view, .st-cards-host) .st-suggest button{font-size:11px;color:#aaa99f;padding:5px 0;text-align:left}
+:is(.st-chat-view, .st-cards-host) .st-suggest button:hover{color:#efefe9}
+:is(.st-chat-view, .st-cards-host) .st-composer{background:#161616;border:1px solid #ffffff08;border-radius:17px;padding:12px 14px 10px;transition:border-color var(--st-duration)}
+:is(.st-chat-view, .st-cards-host) .st-composer:focus-within{border-color:#ffffff20}
+:is(.st-chat-view, .st-cards-host) .st-input{width:100%;min-height:37px;max-height:100px;resize:vertical;border:0;background:transparent;font-size:13px;line-height:1.5;padding:2px 0;display:block}
+:is(.st-chat-view, .st-cards-host) .st-input::placeholder{color:#7c7c76}
+:is(.st-chat-view, .st-cards-host) .st-composer-bottom{display:flex;align-items:center;gap:7px;margin-top:5px}
+:is(.st-chat-view, .st-cards-host) .st-composer-bottom>span{color:#797973;font-size:11px;display:flex;align-items:center;gap:7px}
+:is(.st-chat-view, .st-cards-host) .st-mode-dot{width:4px;height:4px;display:block;border-radius:50%;background:#a1a195}
+:is(.st-chat-view, .st-cards-host) .st-send{width:28px;height:28px;background:#e3e3de;color:#131313;border-radius:9px;margin-left:auto;display:grid;place-items:center}
+:is(.st-chat-view, .st-cards-host) .st-send:disabled{background:#272727;color:#66665f}
+:is(.st-chat-view, .st-cards-host) .st-send:not(:disabled):hover{background:#fff}
+:is(.st-chat-view, .st-cards-host) .st-orbs{width:19px;height:19px;position:relative;filter:blur(.3px)}
+:is(.st-chat-view, .st-cards-host) .st-orbs i{position:absolute;border-radius:50%;background:radial-gradient(circle at 30% 30%,#eaeaea,#818181 55%,#333);width:11px;height:11px;top:4px;left:4px;animation:st-orbit 3.6s ease-in-out infinite}
+:is(.st-chat-view, .st-cards-host) .st-orbs i:nth-child(2){animation-delay:-1.2s;width:8px;height:8px;opacity:.85}
+:is(.st-chat-view, .st-cards-host) .st-orbs i:nth-child(3){animation-delay:-2.4s;width:6px;height:6px;opacity:.6}
+:is(.st-chat-view, .st-cards-host)[data-indicator=orbs].is-working .st-motion{display:none}
+:is(.st-chat-view, .st-cards-host)[data-indicator=orbs].is-working .st-orbs{display:block}
+@keyframes st-enter{from{opacity:0;transform:translateY(5px) scale(.985)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes st-shimmer{0%{background-position:100% 0}100%{background-position:-130% 0}}
+@keyframes st-breathe{50%{opacity:.4;transform:scale(.8)}}
+@keyframes st-orbit{0%,100%{transform:translate(-4px,0) scale(.8)}33%{transform:translate(4px,-3px) scale(1)}66%{transform:translate(1px,5px) scale(.7)}}
+@media(max-width:480px){:is(.st-chat-view, .st-cards-host){border-radius:14px}:is(.st-chat-view, .st-cards-host) .st-top{padding:0 18px}:is(.st-chat-view, .st-cards-host) .st-thread{padding:24px 18px 18px}:is(.st-chat-view, .st-cards-host) .st-footer{padding:0 18px 20px}:is(.st-chat-view, .st-cards-host) .st-user{max-width:94%;font-size:12px}:is(.st-chat-view, .st-cards-host) .st-account{gap:8px}:is(.st-chat-view, .st-cards-host) .st-account-copy{font-size:11px}:is(.st-chat-view, .st-cards-host) .st-account-copy small{font-size:11px}:is(.st-chat-view, .st-cards-host) .st-button{padding:8px 9px;font-size:11px}:is(.st-chat-view, .st-cards-host) .st-input{font-size:16px}:is(.st-chat-view, .st-cards-host) .st-crumb{font-size:11px}}
+@media(pointer:coarse){:is(.st-chat-view, .st-cards-host) button{min-height:44px}:is(.st-chat-view, .st-cards-host) .st-send,:is(.st-chat-view, .st-cards-host) .st-icon{min-width:44px}:is(.st-chat-view, .st-cards-host) .st-account{flex-wrap:wrap}:is(.st-chat-view, .st-cards-host) .st-account-copy{min-width:80px}}
+@media(prefers-reduced-motion:reduce){:is(.st-chat-view, .st-cards-host) *,:is(.st-chat-view, .st-cards-host) *::before{animation:none!important;transition:none!important}:is(.st-chat-view, .st-cards-host).is-working .st-motion{display:none}:is(.st-chat-view, .st-cards-host).is-working .st-still{display:block}:is(.st-chat-view, .st-cards-host).is-working .st-work-label{background:none;color:#aaa}:is(.st-chat-view, .st-cards-host)[data-indicator=orbs] .st-orbs{display:none!important}}
+
+/* ---------- przebieg pracy (agent-progress-detail.html) ---------- */
+
+.ap-progress{font-family:"Inter Studio",Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#e7e7e2;font-size:13px;line-height:1.55;--ap-ease:cubic-bezier(.22,.8,.25,1);--ap-duration:500ms;--ap-spacing:17px;color-scheme:dark;-webkit-font-smoothing:antialiased}
+.ap-progress *{box-sizing:border-box}
+.ap-progress button{font:inherit;border:0;background:transparent;color:inherit;display:inline-flex;align-items:center;gap:8px;text-align:left}
+.ap-progress button:active{transform:scale(.99)}
+.ap-progress svg{width:14px;height:14px;stroke-width:1.6;flex-shrink:0}
+.ap-progress .ap-surface{padding:30px 32px 27px;background:#090909;border-radius:16px 16px 0 0;min-height:318px}
+.ap-progress .ap-top{display:flex;align-items:center;gap:12px;max-width:530px;margin:0 auto 0}
+.ap-progress .ap-trigger{padding:3px 0;min-width:0;flex:1;font-size:13px;gap:11px}
+.ap-progress .ap-symbol{display:grid;place-items:center;width:23px;height:23px;flex-shrink:0}
+.ap-progress .ap-symbol img{width:23px;height:23px;object-fit:contain}
+.ap-progress .ap-count{color:#81817d;font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.ap-progress .ap-heading{color:#d2d2cc}
+.ap-progress[data-playing=true] .ap-heading{background:linear-gradient(100deg,#92928c 30%,#e9e9e1 50%,#92928c 70%);background-size:260% 100%;background-clip:text;-webkit-background-clip:text;color:transparent;animation:ap-shimmer 3.8s ease-in-out infinite}
+.ap-progress .ap-trigger>svg{width:12px;height:12px;color:#797972;transition:transform var(--ap-duration) var(--ap-ease)}
+.ap-progress .ap-trigger[aria-expanded=true]>svg{transform:rotate(90deg)}
+.ap-progress .ap-list-wrap{display:grid;grid-template-rows:1fr;transition:grid-template-rows var(--ap-duration) var(--ap-ease),opacity var(--ap-duration);max-width:530px;margin:auto}
+.ap-progress[data-expanded=false] .ap-list-wrap{grid-template-rows:0fr;opacity:0;pointer-events:none}
+.ap-progress .ap-list-clip{overflow:hidden;min-height:0}
+.ap-progress .ap-list{list-style:none;padding:19px 0 0 34px;margin:0}
+.ap-progress .ap-item{padding:0 0 var(--ap-spacing);position:relative}
+.ap-progress .ap-item:last-child{padding-bottom:0}
+.ap-progress .ap-line{display:flex;align-items:center;gap:10px;min-height:22px}
+.ap-progress .ap-status-icon{width:16px;height:16px;position:relative;flex-shrink:0;display:grid;place-items:center}
+.ap-progress .ap-status-icon>svg{position:absolute;width:14px;height:14px;opacity:0;transform:scale(.7);color:#87877f;transition:opacity 300ms,transform 420ms var(--ap-ease)}
+.ap-progress .ap-idle{width:5px;height:5px;border-radius:50%;background:#54544e;position:absolute;transition:opacity 280ms}
+.ap-progress .ap-spinner{position:absolute;width:14px;height:14px;border-radius:50%;border:1px solid #d4d4c92b;border-top-color:#e8e8df;border-right-color:#a1a195;opacity:0;animation:ap-spin 1.1s linear infinite;animation-play-state:paused;transition:opacity 300ms}
+.ap-progress .ap-label{color:#83837c;transition:color 420ms;font-size:12px}
+.ap-progress .ap-item[data-state=running] .ap-label{color:#e9e9df}
+.ap-progress .ap-item[data-state=done] .ap-label{color:#8e8e86}
+.ap-progress .ap-item[data-state=running] .ap-spinner{opacity:1;animation-play-state:running}
+.ap-progress .ap-item[data-state=running] .ap-idle,.ap-progress .ap-item[data-state=done] .ap-idle{opacity:0}
+.ap-progress .ap-item[data-state=done] .ap-status-icon>svg{opacity:1;transform:scale(1)}
+.ap-progress .ap-item[data-state=done] .ap-status-icon>svg path{stroke-dasharray:25;stroke-dashoffset:0;animation:ap-check 400ms var(--ap-ease)}
+.ap-progress .ap-detail-wrap{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows var(--ap-duration) var(--ap-ease),opacity 350ms,transform var(--ap-duration);transform:translateY(-3px)}
+.ap-progress .ap-item[data-state=running] .ap-detail-wrap,.ap-progress[data-details=all] .ap-item[data-state=done] .ap-detail-wrap{grid-template-rows:1fr;opacity:1;transform:translateY(0)}
+.ap-progress .ap-detail-clip{overflow:hidden;min-height:0}
+.ap-progress .ap-details{margin:8px 0 1px 7px;padding:1px 0 1px 19px;border-left:1px solid #272723;display:grid;gap:8px}
+.ap-progress .ap-subline{color:#aaa99f;font-size:11px;display:flex;gap:7px;align-items:center;min-height:18px}
+.ap-progress .ap-subline svg{width:12px;height:12px;color:#707066}
+.ap-progress .ap-event{font-size:11px;color:#838377;min-height:18px}
+.ap-progress .ap-event span{display:inline-block}
+.ap-progress .ap-chip{padding:3px 7px;background:#171716;border-radius:5px;color:#acaca3;font-size:11px;display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+.ap-progress .ap-sources{display:flex;gap:5px;flex-wrap:wrap}
+.ap-progress .ap-footer{margin:20px auto 0;max-width:530px;padding-left:34px;display:flex;align-items:center;gap:8px;font-size:11px;color:#77776e;transition:color 300ms}
+.ap-progress .ap-footer svg{width:12px;height:12px}
+.ap-progress[data-finished=true] .ap-footer{color:#b1b1a5}
+.ap-progress .ap-controls{display:flex;align-items:center;gap:12px;padding:5px 27px 17px;color:#8d8d87;background:#090909;border-radius:0 0 16px 16px;font-size:11px}
+.ap-progress .ap-controls>span{margin-right:auto}
+.ap-progress .ap-controls button{padding:5px 6px;font-size:11px;color:#aaa99f}
+.ap-progress .ap-controls button:hover{color:#eee}
+.ap-progress .ap-controls button:disabled{opacity:.35;transform:none}
+.ap-progress[data-playing=false] .ap-spinner{animation-play-state:paused!important}
+.ap-progress[data-playing=false] .ap-heading{animation-play-state:paused}
+.ap-progress [hidden]{display:none!important}
+@keyframes ap-spin{to{transform:rotate(360deg)}}
+@keyframes ap-check{from{stroke-dashoffset:25}to{stroke-dashoffset:0}}
+@keyframes ap-shimmer{from{background-position:100% 0}to{background-position:-150% 0}}
+@media(max-width:440px){.ap-progress .ap-surface{padding:22px 18px;min-height:330px}.ap-progress .ap-top{gap:8px}.ap-progress .ap-trigger{font-size:12px;gap:8px}.ap-progress .ap-list{padding-left:16px}.ap-progress .ap-footer{padding-left:16px}.ap-progress .ap-count{font-size:11px}.ap-progress .ap-controls{gap:4px}}
+@media(pointer:coarse){.ap-progress button{min-height:44px}}
+@media(prefers-reduced-motion:reduce){.ap-progress *,.ap-progress *::before{animation:none!important;transition:none!important}.ap-progress .ap-heading{background:none!important;color:#ccc!important}}
+
+/* ---------------------------------------------------------------------------
+ * ZMIANY WZGLĘDEM MAKIETY. Każda z powodem; lista jest kompletna.
+ * ------------------------------------------------------------------------- */
+
+/*
+ * 1. Korzeń widoku nie ma `border-radius` ani własnego tła strony. W makiecie rozmowa jest
+ *    kartą osadzoną w cudzej stronie; w Studiu jest treścią kolumny, która ma już swoje tło,
+ *    a zaokrąglony prostokąt w środku kolumny wyglądałby jak okno w oknie.
+ */
+:is(.st-chat-view, .st-cards-host) {
+  border-radius: 0;
+  background: transparent;
+}
+
+/*
+ * 2. Przebieg pracy stoi W WĄTKU, a nie na własnej powierzchni z zaokrąglonym dołem, i nie ma
+ *    paska sterowania demonstracją (pauza, odtwórz ponownie): w produkcie postęp jest stanem
+ *    prawdziwej tury, więc nie ma czego odtwarzać.
+ */
+.ap-progress .ap-surface {
+  background: transparent;
+  border-radius: 0;
+  min-height: 0;
+  padding: 4px 0 0;
+}
+
+.ap-progress .ap-controls {
+  display: none;
+}
+
+/*
+ * 3. Rodzina nazywa się „Inter Studio", a nie „Inter”, i stoi PRZED nazwą systemową. Makieta
+ *    pisze samo `Inter`, co na maszynie z zainstalowanym Interem bierze wersję systemową, a na
+ *    każdej innej cicho schodzi do kroju systemowego. Własna nazwa znaczy, że renderuje się
+ *    plik z repozytorium albo nic, i to widać od razu, zamiast po zrzutach z dwóch maszyn.
+ */
+
+/* ---------------------------------------------------------------------------
+ * KLASY, KTÓRYCH MAKIETA NIE MA, i powód każdej.
+ *
+ * Makieta pokazuje ŚCIEŻKĘ, KTÓRA SIĘ UDAJE: konto się łączy, społeczność przyjmuje, szkic
+ * wychodzi. Produkt musi pokazać też to, co się nie udaje, i to, czego zrobić nie można, a na
+ * to w makiecie nie ma ani jednego elementu. Te reguły dokładają brakujące kawałki w tym samym
+ * języku wizualnym, zamiast zostawiać nieostylowany tekst wchodzący na inne napisy: pierwszy
+ * render Studia na prawdziwych danych wyglądał dokładnie tak i jest zapisany w
+ * `output/porownanie-1-1/studio-0-przed-poprawka-kart.jpg`.
+ * ------------------------------------------------------------------------- */
+
+/* Karty jedna pod drugą, z tym samym odstępem, co reszta wątku. */
+:is(.st-chat-view, .st-cards-host) .st-cards {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 16px;
+}
+
+/* Formularz akcji NIE JEST elementem układu: to opakowanie przycisku, który w makiecie stoi
+   sam. Bez tego każdy przycisk dostawałby własny wiersz i karta rozjeżdżałaby się w pion. */
+:is(.st-chat-view, .st-cards-host) .st-card-form {
+  display: contents;
+}
+
+/*
+ * Powód odmowy. Osobny wiersz POD kartą, w pełnej szerokości, bo to jest zdanie do przeczytania,
+ * a nie etykieta: wciśnięty w wiersz z przyciskiem zostałby przycięty i nikt by nie wiedział,
+ * czego karta odmówiła.
+ */
+:is(.st-chat-view, .st-cards-host) .st-card-reason {
+  grid-column: 1 / -1;
+  margin: 2px 0 0;
+  padding: 0;
+  color: #b9b1a6;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+:is(.st-chat-view, .st-cards-host) .st-account .st-card-reason {
+  flex-basis: 100%;
+}
+
+/*
+ * Konto, którym nie da się zadziałać. Stoi w miejscu przycisku, bo zajmuje jego rolę: odpowiada
+ * na pytanie „co mogę z tym zrobić", tyle że odpowiedź brzmi „nie tutaj".
+ */
+:is(.st-chat-view, .st-cards-host) .st-account-blocked {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--st-muted);
+  text-align: right;
+  max-width: 190px;
+}
+
+:is(.st-chat-view, .st-cards-host) .st-account-blocked a {
+  color: #cfcfc9;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/*
+ * Two more account-card lines the mock-up never shows (26.09, connecting X): the capsule's reading
+ * of why the account is not connected, and the one-line sign-in instruction. Full width under the
+ * row and quieter than the name, like the delegation scope; without `flex-basis` each would
+ * squeeze into the row beside the button, the collapse measured on 20.09 for the refusal reason.
+ */
+:is(.st-chat-view, .st-cards-host) .st-account-note {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--st-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* Zakres i sufity powierzenia: pod przyciskiem, mniejsze, bo to jest to, co podpisujesz, a nie
+   zachęta do podpisania. */
+:is(.st-chat-view, .st-cards-host) .st-autonomy {
+  flex-wrap: wrap;
+}
+
+:is(.st-chat-view, .st-cards-host) .st-autonomy-scope,
+:is(.st-chat-view, .st-cards-host) .st-autonomy-why {
+  flex-basis: 100%;
+  color: var(--st-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* Zapadki bez strzałki przeglądarki: w makiecie rozwijaniem steruje przycisk z chevronem, więc
+   marker listy byłby drugim znaczkiem obok pierwszego. */
+:is(.st-chat-view, .st-cards-host) details > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+:is(.st-chat-view, .st-cards-host) details > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* Nagłówek szkicu jest `summary`, więc musi zachować układ wiersza z makiety. */
+:is(.st-chat-view, .st-cards-host) .st-draft-open > summary {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 13px;
+  font-size: 12px;
+}
+
+:is(.st-chat-view, .st-cards-host) .st-community-why > summary {
+  display: inline-flex;
+}
+
+/* Pole poprawki otwiera się w miejscu, bez przeskoku układu. */
+:is(.st-chat-view, .st-cards-host) .st-draft-fix {
+  width: 100%;
+}
+
+:is(.st-chat-view, .st-cards-host) .st-draft-fix > summary {
+  display: inline-flex;
+  padding: 5px 0;
+  color: #a5a5a0;
+}
+
+/*
+ * Szkic po publikacji: potwierdzenie, odsyłacz i zdanie o widoczności, jedno pod drugim.
+ * Trzy rzeczy w jednej linii nie mieszczą się w karcie o szerokości 450 px, a zdanie o
+ * widoczności bywa długie („skutek niepotwierdzony, sprawdzone 04:12"), bo pochodzi z odczytu
+ * zwrotnego, a nie z szablonu.
+ */
+:is(.st-chat-view, .st-cards-host) .st-draft-done {
+  display: grid;
+  gap: 4px;
+  justify-items: flex-end;
+  text-align: right;
+}
+
+:is(.st-chat-view, .st-cards-host) .st-draft-address {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #cfcfc9;
+  font-size: 11px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+:is(.st-chat-view, .st-cards-host) .st-draft-visibility {
+  color: var(--st-muted);
+  font-size: 11px;
+  line-height: 1.5;
+  max-width: 260px;
+}
+
+/* Zrzut ekranu dołączony do własnego posta na X (27.09): jedno zdanie pod tekstem szkicu. */
+:is(.st-chat-view, .st-cards-host) .st-draft-image {
+  color: var(--st-muted);
+  font-size: 11px;
+  line-height: 1.5;
+  margin: -6px 0 12px;
+}
+
+/*
+ * WYPOWIEDZI W WIDOKU ROZMOWY: jeden poziom tła, nie dwa.
+ *
+ * `studio.css` daje `.st-turn` własne tło i wyściółkę, bo przed D-046 to ONO było bańką. Po
+ * przeniesieniu na makietę bańką jest `.st-user` w środku, więc zewnętrzny panel rysował drugie
+ * tło wokół pierwszego i zostawiał pas pustki pod tekstem (widoczne na
+ * `output/porownanie-1-1/studio-1-gora-rozmowy.jpg`, uwaga koordynatora z 20.09). Tutaj
+ * zewnętrzny element wraca do roli opakowania: bez tła, bez wyściółki, bez własnej szerokości.
+ */
+:is(.st-chat-view, .st-cards-host) .st-turn {
+  background: transparent;
+  padding: 0;
+  max-width: none;
+  border-radius: 0;
+}
+
+:is(.st-chat-view, .st-cards-host) .st-turn[data-who="user"] {
+  align-self: stretch;
+}
+
+/* „powierzony cel" zostaje, ale jako mała etykieta NAD bańką, wyrównana do niej, a nie jako
+   nagłówek własnego panelu. */
+:is(.st-chat-view, .st-cards-host) .st-turn[data-who="user"] > .st-note {
+  display: block;
+  text-align: right;
+  margin: 0 0 4px;
+  color: var(--st-muted);
+  font-size: 11px;
+}
+
+/*
+ * Popover konta: `details` NIE MOŻE BYĆ KOTWICĄ pozycjonowania.
+ *
+ * W makiecie `.st-popover` jest bezpośrednim dzieckiem `.st-account` i ma `width: 263px;
+ * max-width: 100%`, gdzie te sto procent to szerokość całej karty. U mnie opakowaniem jest
+ * `details`, szerokie tyle, co przycisk, więc `max-width: 100%` ścisnęło panel do około stu
+ * pikseli i „Profil w tym projekcie" łamało się na cztery linie (widoczne przy porównaniu 1:1).
+ * `position: static` sprawia, że kotwicą zostaje `.st-account`, dokładnie jak w makiecie.
+ */
+:is(.st-chat-view, .st-cards-host) .st-account-pop {
+  position: static;
+}
+
+/*
+ * 27.09: the panel opens under its card and the card is usually the last thing in the thread, so
+ * "Kontynuuj" sat behind the composer. The shell's panel script scrolls an opened panel into view;
+ * this margin makes "into view" mean above the composer, not under it.
+ */
+:is(.st-chat-view, .st-cards-host) .st-popover {
+  scroll-margin-bottom: 150px;
+}
+
+/*
+ * Karta SILNIKA w stanie logowania urządzenia: adres i kod do przepisania.
+ *
+ * Kod jest jedyną rzeczą na tym ekranie, którą człowiek PRZEPISUJE ręcznie, więc dostaje krój
+ * o stałej szerokości i odstęp między znakami: „0" i „O" w kroju proporcjonalnym różnią się
+ * na tyle mało, że przepisanie kodu z ekranu staje się zgadywaniem.
+ */
+:is(.st-chat-view, .st-cards-host) .st-engine-login {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+:is(.st-chat-view, .st-cards-host) .st-engine-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  padding: 5px 9px;
+  border-radius: 7px;
+  background: var(--st-raised);
+  color: var(--st-ink);
+}
+
+/* Zdanie „co to znaczy" pod społecznością: pełna szerokość wiersza, ciszej niż nazwa. */
+:is(.st-chat-view, .st-cards-host) .st-community-meaning {
+  grid-column: 1 / -1;
+  margin-top: 4px;
+  color: var(--st-muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+/*
+ * KARTA, KTÓRA MA WIĘCEJ DO POWIEDZENIA NIŻ MAKIETA, ŁAMIE WIERSZ ZAMIAST ŚCISKAĆ KOLUMNĘ.
+ *
+ * Zobaczone na zrzucie z prawdziwych danych 20.09 (`output/porownanie-1-1/runda-1/
+ * studio-4-szkic-rozwiniety-i-karta-silnika.jpg`): karta SILNIK z powodem błędu rozpadła się na
+ * cztery wiersze po jednym słowie, a przycisk wszedł na tekst. Przyczyna jest w połączeniu
+ * dwóch poprawnych rzeczy: `.st-account` z makiety jest JEDNYM wierszem (`display:flex` bez
+ * zawijania, bo w makiecie mieści się nazwa i przycisk), a powód odmowy dostał u nas
+ * `flex-basis:100%`, żeby stanąć pod spodem. Bez zawijania „sto procent" nie schodzi do nowego
+ * wiersza, tylko zabiera całą szerokość w tym samym, więc reszta kurczy się do zera.
+ *
+ * Dlaczego zawijanie, a nie węższy powód: powód jest zdaniem do przeczytania, a nazwa konta i
+ * przycisk mają zostać czytelne. Przy szerokości makiety nic się nie zmienia, bo nie ma czego
+ * zawijać; zmienia się dopiero tam, gdzie produkt mówi więcej niż makieta.
+ */
+:is(.st-chat-view, .st-cards-host) .st-account {
+  flex-wrap: wrap;
+}
+
+/*
+ * PRZYCISK KARTY MA SWÓJ ROZMIAR, NIEZALEŻNY OD TEGO, JAKIM JEST ELEMENTEM.
+ *
+ * Odbiór 1, różnica nr 9: „Połącz konto" (`summary`), „Włączam obserwację…" i „Obserwuję"
+ * (`span`) miały 14 px i 38 px wysokości, a prawdziwe `<button>` obok nich („Kontynuuj",
+ * „Spróbuj ponownie") 12 px i 33 px, jak w makiecie. Powód jest w kaskadzie: stopień pisma
+ * przychodził z reguły `button` przepisanej z makiety, a `.st-button` opisywał tylko kształt.
+ * W makiecie każdy z tych przycisków JEST `<button>`, więc pytanie nie powstało.
+ *
+ * Dlaczego nie zamieniamy ich na `<button>`: „Połącz konto" otwiera `details` (popover bez
+ * skryptu), a „Obserwuję" to STAN, nie działanie, i przycisk, który niczego nie robi, jest
+ * kłamstwem ekranu. Klasa dostaje więc własny rozmiar, a element zostaje ten, który wynika ze
+ * znaczenia.
+ */
+:is(.st-chat-view, .st-cards-host) .st-button {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/*
+ * WYPOWIEDŹ AGENTA W ROZMOWIE BIERZE MIARĘ Z MAKIETY, nie ze Studia.
+ *
+ * Odbiór 1, różnica nr 11: tekst agenta miał 15 px, kolor `--st-ink` i interlinię 24,3 px, a
+ * makieta 14 px, #e2e2de i 22,4 px. Kaskada tłumaczy to bez tajemnic: `.st-agent` z makiety
+ * opisuje AKAPIT, a `.st-answer` ze `studio.css` opisuje TEN SAM tekst i jest bliżej, więc
+ * wygrywa. Poza rozmową (wyniki, materiały) `.st-answer` zostaje taki, jaki był: to jest miara
+ * tekstu Studia i nie ma powodu jej ruszać tam, gdzie makiety nie ma.
+ *
+ * Zostawiamy `max-width: 68ch` ze Studia: rodzic z makiety i tak przycina do 480 px, a miara
+ * „ile znaków w wierszu oko czyta bez gubienia" jest decyzją produktu, nie stylem.
+ */
+:is(.st-chat-view, .st-cards-host) .st-agent .st-answer {
+  font-size: 14px;
+  color: #e2e2de;
+  line-height: 1.6;
+}
+
+/*
+ * SZKIC: AKCJE W PRAWYM DOLNYM ROGU, NAPIS PRZEŁĄCZANY PRZEZ STAN ZAPADKI (odbiór 1, nr 10).
+ *
+ * W referencji „Popraw" i „Opublikuj" stoją obok siebie po prawej, pod treścią; u nas „Popraw"
+ * było zapadką na całą szerokość, więc lądowało samotnie po lewej. `width: 100%` miało sens,
+ * gdy pod spodem rozwijało się pole edycji, i ten sens zostaje: szeroka jest ROZWINIĘTA zapadka,
+ * a nie jej przycisk.
+ */
+:is(.st-chat-view, .st-cards-host) .st-draft-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+:is(.st-chat-view, .st-cards-host) .st-draft-actions > .st-note {
+  margin-right: auto;
+  max-width: 60%;
+}
+
+:is(.st-chat-view, .st-cards-host) .st-draft-fix {
+  width: auto;
+}
+
+:is(.st-chat-view, .st-cards-host) .st-draft-fix[open] {
+  width: 100%;
+}
+
+/* Dwa napisy w jednym miejscu: widać ten, który pasuje do stanu zapadki. */
+:is(.st-chat-view, .st-cards-host) .st-draft-toggle [data-when="otwarte"],
+:is(.st-chat-view, .st-cards-host) details[open] > summary .st-draft-toggle [data-when="zamkniete"] {
+  display: none;
+}
+
+:is(.st-chat-view, .st-cards-host) details[open] > summary .st-draft-toggle [data-when="otwarte"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+:is(.st-chat-view, .st-cards-host) .st-draft-toggle [data-when="zamkniete"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* Chevron linii pracy obraca się na otwartej zapadce. W makiecie robi to `aria-expanded`
+   ustawiane skryptem; u nas zapadka jest `details`, więc stan jest w `open` i nie ma czego
+   synchronizować. */
+:is(.st-chat-view, .st-cards-host) .st-work-toggle .ic-chevron-right {
+  width: 12px;
+  height: 12px;
+  color: #70706c;
+  transition: transform var(--st-duration);
+}
+
+:is(.st-chat-view, .st-cards-host) details[open] > .st-work-toggle .ic-chevron-right {
+  transform: rotate(90deg);
+}
+
+/* `summary` z makiety nie ma znacznika przeglądarki: kształt niesie chevron. */
+:is(.st-chat-view, .st-cards-host) .st-work-toggle::-webkit-details-marker {
+  display: none;
+}
+
+:is(.st-chat-view, .st-cards-host) .st-work-toggle {
+  list-style: none;
+}
+
+
+/*
+ * POWIERZCHNIA LISTY SPOŁECZNOŚCI ZOSTAJE POWIERZCHNIĄ.
+ *
+ * `.st-communities-list` ma w `studio.css` tło #131313 i promień 20, ale nosi też
+ * `st-cards-host`, a ten arkusz zeruje tło korzenia (`background: none`) i stoi PÓŹNIEJ, więc
+ * wygrywał: lista renderowała się bez tła i bez promienia (odbiór 2, kaskada E-F). Reguła
+ * korzenia jest słuszna tam, gdzie karty stoją w wątku; tutaj korzeń JEST powierzchnią.
+ */
+:is(.st-chat-view, .st-cards-host).st-communities-list {
+  background: #131313;
+  border-radius: 20px;
+}
+
+
+/*
+ * `.st-text` MA SWÓJ ROZMIAR, tak jak `.st-button` (odbiór 2, nr 10). „Popraw" jest `summary`,
+ * więc brał 14 px i 32 px od elementu, a prawdziwy przycisk obok 12 px i 26,8 px. Ta sama
+ * choroba, co przy przyciskach kart, tylko piętro niżej.
+ */
+:is(.st-chat-view, .st-cards-host) .st-text {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/*
+ * „Zobacz" i „Zwiń" przy PRAWEJ krawędzi nagłówka szkicu (odbiór 2 N1, odbiór 3 N1).
+ *
+ * Reguła z makiety `.st-draft-head>span{flex:1}` opisuje TYTUŁ, bo w makiecie przełącznik nie
+ * jest `span`-em. U nas jest, więc rozpychał się razem z tytułem i stał 147 px od krawędzi
+ * zamiast 13. Rozpycha się tytuł; przełącznik ma swoją szerokość.
+ *
+ * Poprzednie podejście dopisywało `flex: 0 0 auto` na samej klasie i PRZEGRYWAŁO, choć stało
+ * niżej w pliku: `… .st-draft-head>span` ma swoistość 0,2,1 (klasa, klasa, element), a
+ * `… .st-draft-toggle` tylko 0,2,0. Kolejność rozstrzyga dopiero przy remisie, więc selektor
+ * musi nazwać i rodzica, i element. Pomiar po zmianie: tekst kończy się 13 px od krawędzi karty,
+ * nie pudełko.
+ */
+:is(.st-chat-view, .st-cards-host) .st-draft-head > span.st-draft-toggle {
+  flex: 0 0 auto;
+}
+
+/* Live work belongs to the conversation, with the same quiet brand motion. */
+.st-live-work { display:flex; align-items:center; gap:9px; color:var(--st-muted); font-size:13px; padding:8px 0; }
+.st-live-work[hidden] { display:none; }
+.st-live-work img { object-fit:contain; transform-origin:left center; }
+.st-live-work[data-playing="true"] img { animation:st-live-logo 1.8s ease-in-out infinite; }
+.st-live-flow { font-size:15px; line-height:1.7; }
+.st-live__answer { white-space:pre-wrap; }
+@keyframes st-live-logo { 0%,100% { transform:scaleX(.88) scaleY(.94); opacity:.55; } 50% { transform:scaleX(1) scaleY(1.05); opacity:1; } }
+@media(prefers-reduced-motion:reduce) { .st-live-work[data-playing="true"] img { animation:none; } }
+
+.st-local-mode { font-size:11px; color:var(--st-muted); margin-left:auto; white-space:nowrap; }
+.st-budget { margin-left:auto; font-size:11px; color:var(--st-muted); }
+.st-budget summary { cursor:pointer; }
+.st-budget[open] { flex-basis:100%; }
+.st-answer__code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 12px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: inherit;
+  background: var(--surface, #111);
+  padding: 16px;
+  border-radius: 12px;
+}
+.st-turn-error { margin: 12px 0; }
+.st-answer .st-answer__code code { padding: 0; background: transparent; font: inherit; }
+/* Documents opened from the conversation retain its typography and quiet controls. */
+.st .st-material-reader{max-width:784px;margin:28px 0 36px;padding:24px;border:1px solid #222;border-radius:16px;background:#101010;overflow-wrap:anywhere}
+.st .st-material-reader h2{font-size:20px;font-weight:500;line-height:1.4;margin:18px 0 24px}
+.st .st-material-reader .st-answer{font-size:14px;line-height:1.7}
+.st .st-material-pages{display:flex;align-items:center;gap:18px;justify-content:space-between;margin-top:24px;font-size:12px;color:#888}
+
+/* Czytelny dokument korzysta z tych samych akcentów co odpowiedź w rozmowie. */
+.st .st-material-reader .st-answer h3{font-size:14px;font-weight:500;margin:26px 0 10px;color:#f0f0ed}
+.st .st-material-reader .st-answer p{margin:0 0 12px}
+.st .st-material-reader .st-answer ol{list-style:decimal;margin:10px 0 18px;padding-left:22px}
+.st .st-material-reader .st-answer ul{list-style:disc;margin:10px 0 18px;padding-left:22px}
+.st .st-material-reader .st-answer li+li{margin-top:10px}

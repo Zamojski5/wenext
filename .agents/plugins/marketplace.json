@@ -1,0 +1,32 @@
+{
+  "name": "wenext",
+  "interface": {
+    "displayName": "Wenext"
+  },
+  "plugins": [
+    {
+      "name": "wenext",
+      "source": {
+        "source": "local",
+        "path": "./plugins/wenext"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    },
+    {
+      "name": "wenext-cloud",
+      "source": {
+        "source": "local",
+        "path": "./plugins/wenext-cloud"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

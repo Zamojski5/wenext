@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Forum — {{ site_name }}{% endblock %}
+{% block page_id %}communities{% endblock %}
+{% block content %}
+<h1>Forum</h1>
+<ul class="community-list" data-testid="community-list">
+  {% for c in communities %}
+    <li>
+      <h2><a href="/c/{{ c.slug }}">{{ c.name }}</a></h2>
+      <p>{{ c.description }}</p>
+      <p class="meta">{{ c.members }} członków · {{ counts[c.slug] }} wątków</p>
+    </li>
+  {% endfor %}
+</ul>
+{% endblock %}

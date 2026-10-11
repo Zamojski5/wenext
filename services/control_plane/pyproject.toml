@@ -1,0 +1,90 @@
+[project]
+name = "wenext-control-plane"
+version = "0.1.0"
+description = "Control plane E1.F1 — FastAPI, granica operatora, kolejka jobów nad PostgreSQL"
+license = "MIT"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "community-os-contracts",
+    # `control_plane.policy.urlpolicy` IMPORTUJE `mcp_sidecar.origins` jako JEDYNĄ
+    # kanonikalizację originów w repozytorium (D-019, test dowodzi tożsamości obiektu).
+    # Do 2026-08-31 tej zależności tu NIE BYŁO, a `import control_plane.policy` padał
+    # w układzie odtwarzającym obraz — testy na hoście były zielone wyłącznie dzięki
+    # ścieżkowemu fallbackowi w urlpolicy.py, którego w kontenerze nie ma czym zaspokoić.
+    # Dockerfile w tym katalogu musi kopiować ten pakiet; zmiana jednego bez drugiego
+    # zostawia dokładnie tę usterkę.
+    "wenext-mcp-sidecar",
+    "asyncpg>=0.30",
+    # D-018: osobny DEK per profil, opakowany kluczem z pliku 0600. Migracja 0003 dopuszcza
+    # w `profile_deks.algorithm` DOKŁADNIE jedną wartość — `AES-256-GCM` — a stdlib Pythona
+    # nie ma żadnego AEAD. Bez tej biblioteki `control_plane.storage.profile_crypto` nie
+    # istnieje, a jedyną alternatywą byłoby wpisanie do kolumny algorytmu, którego kod nie
+    # implementuje: dokładnie ten cichy downgrade, przed którym migracja 0003 ostrzega.
+    # Ta sama wersja, co w `services/stream_gateway` (jedna wersja biblioteki w repo).
+    "cryptography>=50",
+    # D-016: hasło operatora weryfikowane Argon2id wobec wiersza w `operators`; CHECK
+    # `credential_hash_is_argon2id` w migracji 0002 wymaga postaci `$argon2id$…`, a stdlib
+    # Pythona nie ma Argon2 — bez tej biblioteki granicy operatora nie da się domknąć.
+    "argon2-cffi>=25.1",
+    "fastapi>=0.141",
+    "uvicorn[standard]>=0.52",
+    # Outcome A (docs/OUTCOMES.md §5): the community adapters the observe handlers run, and the
+    # Codex SDK the model turns go through. The SDK pin is the one from versions.lock.toml
+    # [codex]; the Dockerfile installs the same string and symlinks the CLI it brings.
+    "wenext-community-observer",
+    "openai-codex==0.147.0",
+    # P1 etap 2 (D-040): połączenia Codex. `control_plane.workspace.engine` rozmawia z
+    # app-serverem przez wąski klient JSON-RPC z tego pakietu, bo SDK NIE MA paginacji
+    # `model/list` ani `account/rateLimits/read` w publicznej powierzchni (NOTES.md, errata 4).
+    # Ten sam pakiet trzyma hardening katalogu połączenia: `cli_auth_credentials_store = "file"`
+    # jest tym, co sprawia, że osobny CODEX_HOME w ogóle izoluje (L2205). Druga kopia tej wiedzy
+    # w control plane rozjechałaby się bez ostrzeżenia.
+    "wenext-codex-runtime",
+]
+
+[project.optional-dependencies]
+# httpx is not decoration: `fastapi.testclient.TestClient` is a thin wrapper over it and
+# refuses to import without it, so every route test in this package depends on it.
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=1.0",
+    "httpx>=0.28",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["control_plane"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+markers = [
+    "db: wymaga PostgreSQL (uruchamiane przez tools/dev/run_db_tests.sh)",
+    # Zestaw regresji P0 (ROADMAP-PIVOT): praca nie ginie i nie dubluje się, a status odróżnia
+    # wykonanie, niepewny skutek i potwierdzony rezultat. Uruchamia go tools/dev/p0_regression.sh
+    # i tylko ten skrypt zapisuje artefakt z werdyktem.
+    "p0: regresja P0 (restart, lease, wolna baza, niejednoznaczny submit, widoczność publikacji)",
+    # P2: sesja agenta z celem, trwały wątek, narzędzia produktu i wznowienie po restarcie.
+    "p2: sesja agenta (store, klient app-servera, narzędzia MCP, handler tury, przebieg e2e)",
+    # P4: delegacja, kolektor zdarzeń, tik obecności, tryby i raport doby.
+    "p4: obecność bez otwartego dashboardu (delegacja, obudzenia, tryby, raport doby)",
+    # P5: pamięć, z której widać, co agent zmienił i na czym to oparł.
+    "p5: pamięć i pochodzenie odpowiedzi (result_refs z identyfikatorami z wyników narzędzi)",
+    # P6: wiele platform i współpracujące sesje.
+    "p6: macierz możliwości platform egzekwowana i współpraca sesji",
+    # P7 etap B: gotowość operacyjna (kopie, dostępność, koszt, raport tygodnia).
+    "p7: gotowość operacyjna usługi (puls, incydenty, koszt, limity organizacji)",
+    # P8 etap A: pamięć projektu jako dokumenty nad rejestrem ustaleń (D-043).
+    "p8: dokumenty projektu (generator z rejestru, wersje, podstawa każdego zdania)",
+]
+
+[tool.uv.sources]
+community-os-contracts = { workspace = true }
+# `services/*` jest członkiem workspace'u w korzeniowym pyproject.toml, więc sidecar
+# rozwiązuje się lokalnie. Bez tego wpisu uv szukałby `wenext-mcp-sidecar` na PyPI,
+# gdzie tej nazwy nie ma — i instalacja padłaby, zamiast wziąć pakiet z repo.
+wenext-mcp-sidecar = { workspace = true }
+wenext-community-observer = { workspace = true }
+wenext-codex-runtime = { workspace = true }

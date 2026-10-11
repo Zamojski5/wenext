@@ -1,0 +1,21 @@
+# =============================================================================
+# Nakładka używana WYŁĄCZNIE na czas wielogodzinnego pomiaru GATE-3.
+#
+# Po co istnieje: healthcheck kontenera `codex` (`codex --version` co 10 s
+# z timeoutem 10 s) przy przebiegu liczonym w godzinach piętrzy wywołania
+# i wywraca VM Docker Desktop. Trzy z pięciu podejść do GATE-3 zginęły właśnie
+# tak (D-012 w docs/DECYZJE.md). Kontrakt D12 — „binarka `codex` na PATH" —
+# sprawdza i tak `gate3.py` w kroku 3, więc wyłączenie healthchecku niczego
+# nie zabiera dowodowi.
+#
+# Ta nakładka NIE definiuje żadnego portu i nie może go definiować:
+# niezmiennik publikowanych portów pilnuje `tests/test_published_ports.py`.
+#
+# Użycie (patrz scripts/founder/codex-gonogo.sh krok 4):
+#   docker compose -f docker-compose.yml -f compose.gate3-unattended.yml \
+#     --profile codex run -d ...
+# =============================================================================
+services:
+  codex:
+    healthcheck:
+      disable: true

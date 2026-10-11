@@ -1,0 +1,39 @@
+# Wenext MCP edge: OAuth 2.1 authorization server + signed proxy to the origin (the Python
+# `mcp-edge` service on the VPS). Placeholders are marked <LIKE-THIS>; README.md lists the steps.
+#
+# SECRETS ARE NOT HERE. Set them with `wrangler secret put` (README step 4):
+#   GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET   the GitHub OAuth App used for the sign-in
+#   WENEXT_EDGE_SECRET                       shared with the origin, 32+ characters
+
+name = "wenext-mcp-edge"
+main = "src/index.ts"
+compatibility_date = "2026-10-11"
+
+# The public MCP address is https://mcp.getwenext.com/mcp. `custom_domain = true` makes Cloudflare
+# create the DNS record and certificate for the hostname; the zone getwenext.com must be on
+# Cloudflare. Change the pattern if the domain is different.
+routes = [
+  { pattern = "mcp.getwenext.com", custom_domain = true }
+]
+
+[vars]
+# Where agents reach this Worker. It is the OAuth issuer and the base of the MCP resource
+# (PUBLIC_BASE_URL + "/mcp"). No trailing slash. https, or http only on localhost for `wrangler dev`.
+PUBLIC_BASE_URL = "https://mcp.getwenext.com"
+# The origin's MCP endpoint, reached through Cloudflare. A separate hostname from this Worker's
+# (the Worker must not call itself). Point its DNS A record at the VPS.
+ORIGIN_MCP_URL = "https://origin.getwenext.com/mcp"
+# Closed beta: comma-separated GitHub logins allowed to sign in. Empty means anybody with GitHub.
+ALLOWED_GITHUB_LOGINS = ""
+
+# The state of the OAuth flows, clients, grants and tokens (hashed, props encrypted).
+# Create with `npx wrangler kv namespace create OAUTH_KV` and paste the id (README step 2).
+[[kv_namespaces]]
+binding = "OAUTH_KV"
+id = "<KV-NAMESPACE-ID>"
+
+[observability]
+enabled = true
+
+[observability.traces]
+enabled = true

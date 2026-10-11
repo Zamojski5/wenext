@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Logowanie — {{ site_name }}{% endblock %}
+{% block page_id %}login{% endblock %}
+{% block content %}
+<section class="narrow">
+  <h1>Zaloguj się</h1>
+  <p class="lead">Treść forum i sieci zawodowej jest dostępna wyłącznie dla zalogowanych.</p>
+  {% if error %}<p class="notice negative" data-testid="login-error">{{ error }}</p>{% endif %}
+  <form method="post" action="/login" data-testid="login-form">
+    <label for="username">Login</label>
+    <input id="username" name="username" autocomplete="username" required>
+    <label for="password">Hasło</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required>
+    <input type="hidden" name="next" value="{{ next }}">
+    <button type="submit" data-testid="login-submit">Zaloguj</button>
+  </form>
+  <p class="hint">
+    Po poprawnym haśle wymagany jest drugi składnik. Kod nie jest pokazywany na stronie —
+    trafia wyłącznie do logu serwera.
+  </p>
+</section>
+{% endblock %}

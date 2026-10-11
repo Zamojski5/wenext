@@ -1,0 +1,45 @@
+{
+  "input": {
+    "id": "demo-e3",
+    "source": {
+      "platform": "HACKER_NEWS",
+      "external_id": "synthetic-90000003",
+      "url": "https://news.ycombinator.com/item?id=90000003",
+      "thread_ref": null
+    },
+    "captured_at": "2026-09-03T08:04:00+00:00",
+    "community": {"display_name": "Hacker News, Ask HN", "key": "ask", "language": "en"},
+    "transcript": [
+      {
+        "message_id": "m1",
+        "parent_id": null,
+        "author": "curious_dba",
+        "body": "Ask HN: Is anyone running Postgres 18 in production yet? Curious about experiences.",
+        "created_at": "2026-09-03T08:00:00+00:00",
+        "own": false
+      }
+    ],
+    "target_message_id": "m1",
+    "persona": {"label": "synthetic-maintainer", "profile_version": 1},
+    "relation": {
+      "state": "NEW_ENTRY",
+      "evidence": "no own messages in the thread",
+      "own_message_ids": []
+    },
+    "materials": [],
+    "allowed_reactions": ["WAIT", "SILENCE", "CLARIFY"],
+    "split": "DEV",
+    "synthetic": true,
+    "tags": ["new-entry", "fresh-thread", "wait"]
+  },
+  "reference": {
+    "reaction": "WAIT",
+    "text": null,
+    "could_also": ["SILENCE"],
+    "rationale": "Four minutes old, no replies, and the question is broad. The persona has no Postgres 18 production experience to report, so there is nothing to add now; what the first answers ask about would decide whether a clarifying question is worth it. Waiting is a full result here.",
+    "author_of_reference": "MODEL",
+    "status": "CANDIDATE",
+    "later_messages": [],
+    "outcome_note": "Synthetic demonstration of WAIT as a result without text."
+  }
+}

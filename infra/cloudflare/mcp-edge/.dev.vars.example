@@ -1,0 +1,8 @@
+# Local `wrangler dev` secrets. Copy to .dev.vars (git-ignored) and fill in.
+GITHUB_CLIENT_ID=<github oauth app client id>
+GITHUB_CLIENT_SECRET=<github oauth app client secret>
+# Must equal WENEXT_EDGE_SECRET on the origin (the Python mcp-edge service). 32+ characters.
+WENEXT_EDGE_SECRET=<openssl rand -hex 32>
+# Local URLs for a trial against a Python app on this machine:
+PUBLIC_BASE_URL=http://localhost:8787
+ORIGIN_MCP_URL=http://127.0.0.1:8780/mcp

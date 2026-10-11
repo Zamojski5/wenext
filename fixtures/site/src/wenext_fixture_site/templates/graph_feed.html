@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Sieć zawodowa — {{ site_name }}{% endblock %}
+{% block page_id %}graph-feed{% endblock %}
+{% block content %}
+<h1>Sieć zawodowa</h1>
+<p class="lead">Feed profesjonalny. Reakcje typowane, komentarze płaskie, repost z komentarzem.</p>
+<nav class="tabs" data-testid="feed-tabs">
+  <a href="/g?sort=new" class="{{ 'active' if sort != 'rising' }}">Najnowsze</a>
+  <a href="/g?sort=rising" class="{{ 'active' if sort == 'rising' }}">Rosnące</a>
+</nav>
+<ol class="feed" data-testid="post-list">
+  {% for t in threads %}
+    <li class="post-card" data-thread-id="{{ t.id }}" data-window-state="{{ t.window_state }}">
+      <p class="meta">{{ t.author }} · {{ t.created_at|ago }}</p>
+      <h2><a href="{{ t.path }}">{{ t.title }}</a></h2>
+      <p>{{ t.body }}</p>
+      <p class="reactions">
+        {% for r in t.reactions %}<span class="badge">{{ r.kind }} {{ r.count }}</span>{% endfor %}
+        <span class="badge">{{ t.metrics.reply_count }} komentarzy</span>
+        {% if t.locked %}<span class="badge negative">komentarze wyłączone</span>{% endif %}
+        {% if t.removed_by_moderation %}<span class="badge negative">usunięty przez moderację</span>{% endif %}
+        <span class="badge">{{ t.window_state }}</span>
+      </p>
+    </li>
+  {% endfor %}
+</ol>
+{% endblock %}

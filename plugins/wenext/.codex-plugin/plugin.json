@@ -1,0 +1,33 @@
+{
+  "name": "wenext",
+  "version": "0.1.0",
+  "description": "Finds the first users for what you built. Reads your code, finds people on Reddit and X who are describing the problem it solves right now, drafts replies in your voice, and publishes from your own accounts only after you approve.",
+  "author": {
+    "name": "Wenext"
+  },
+  "keywords": [
+    "marketing",
+    "reddit",
+    "x",
+    "community",
+    "founders"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Wenext",
+    "shortDescription": "Find the first users for what you built",
+    "longDescription": "In about five minutes Wenext reads your code, finds people on Reddit and X who are describing the problem your product solves right now, and prepares replies in your voice. You approve each one with a click, nothing goes out without you, and it measures what happens: replies, upvotes, removals and GitHub stars. It keeps a memory of what worked, so each week starts from the last. Requires the Wenext stack running on your machine.",
+    "developerName": "Wenext",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Find my first users: read my code, find people who need it, draft replies in my voice.",
+      "Turn what I just shipped into an update post.",
+      "How did my replies do this week?"
+    ]
+  },
+  "mcpServers": "./.codex-mcp.json"
+}

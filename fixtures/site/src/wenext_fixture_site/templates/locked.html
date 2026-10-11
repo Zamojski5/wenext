@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Akcja niedostępna — {{ site_name }}{% endblock %}
+{% block page_id %}locked{% endblock %}
+{% block content %}
+<section class="narrow">
+  <h1 data-testid="locked-heading">Akcja niedostępna</h1>
+  <p class="notice negative">
+    Wątek „{{ thread.title }}” jest zablokowany albo usunięty przez moderację.
+    Zapis do niego nie jest możliwy.
+  </p>
+  <p><a href="{{ thread.path }}">Wróć do wątku</a></p>
+</section>
+{% endblock %}

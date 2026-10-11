@@ -1,0 +1,13 @@
+{
+  "secret": "vector-secret-0123456789abcdef0123456789abcdef",
+  "now": 1800000000,
+  "jti": "vector-jti-0001",
+  "ttl": 60,
+  "identity": {
+    "provider": "github",
+    "subject": "4242",
+    "email": "alice@example.com",
+    "login": "alice"
+  },
+  "header": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJwcm92aWRlciI6ImdpdGh1YiIsInN1YmplY3QiOiI0MjQyIiwiZW1haWwiOiJhbGljZUBleGFtcGxlLmNvbSIsImxvZ2luIjoiYWxpY2UiLCJpYXQiOjE4MDAwMDAwMDAsImV4cCI6MTgwMDAwMDA2MCwianRpIjoidmVjdG9yLWp0aS0wMDAxIn0.v1qtivV8Frb1L5wGy6NTmUUyl4Yybf_pf4ODfa0bAl4"
+}

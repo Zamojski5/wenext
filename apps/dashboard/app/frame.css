@@ -1,0 +1,436 @@
+/*
+ * Rama workspace'u, PRZEPISANA Z REFERENCJI (D-046, element E2).
+ *
+ * ŹRÓDŁO. `docs/produkt/prototyp/workspace-studio.html`, czyli pełna rama przyjęta przez
+ * założyciela. Plik jest eksportem samodzielnym: fragment prototypu leży w nim w `srcdoc`
+ * ramki, a pod spodem stoi BLOK NADPISAŃ ciemnej odsłony (`#wenext-minimal`), który zmienia
+ * połowę wartości jasnego fragmentu. To ważne, bo sam fragment na dysku jest JASNY: kto
+ * przeczyta tylko jego, przepisze białe tło i będzie miał rację co do pliku, a nie co do tego,
+ * co widać pod adresem podglądu. Ten arkusz bierze OBA bloki, w tej samej kolejności, co
+ * przeglądarka, i zawęża je do reguł ramy (`.wm-shell` do `.wm-send`); reszta prototypu, czyli
+ * dialogi, listy osób i oś czasu, nie jest tu przenoszona, bo Studio ma na to własne ekrany.
+ *
+ * SPOSÓB: podmiana korzenia `#wenext-minimal` na `.st` i nic poza tym. Deklaracje są
+ * nietknięte, co do piksela. Powód jest wypisany w `chat.css` i tu obowiązuje tak samo:
+ * ręczne przepisanie stu siedemdziesięciu reguł to sto siedemdziesiąt okazji do drobnej
+ * różnicy, której nikt nie zauważy na przeglądzie, a widać ją przy porównaniu zrzutów.
+ *
+ * MARKUP NOSI OBIE NAZWY KLAS: referencyjną `wm-*` i dotychczasową `st__*`. Dzięki temu reguły
+ * niżej trafiają w elementy bez tłumaczenia selektorów (czyli bez miejsca na pomyłkę), a to, co
+ * już jest zbudowane na `st__*`, działa dalej. Gdy `st__*` przestanie być komukolwiek potrzebne,
+ * znikną same nazwy, a nie reguły.
+ *
+ * CZEGO TU NIE MA I DLACZEGO: `.wm-dock` z referencji ma pod awatarem przycisk narzędzi
+ * otwierający kafelki akcji. Studio ich nie renderuje i nie udaje, że ma; reguły zostają w
+ * arkuszu, bo są częścią referencji, ale nie ma elementu, w który mogłyby trafić.
+ *
+ * ZAPYTANIA MEDIÓW SĄ ZACHOWANE, I TO JEST POPRAWKA Z 20.09 WIECZOREM.
+ *
+ * Pierwsze przeniesienie SPŁASZCZYŁO je: reguły z `@media(max-width:580px)` i sąsiednich
+ * wylądowały w arkuszu bez opakowania, czyli obowiązywały ZAWSZE. Na ekranie 1533 px wyglądało
+ * to tak, że `#wenext-minimal .wm-sidebar{display:none}` z odsłony telefonu chowało CAŁY PASEK
+ * BOCZNY, a odstępy i stopnie pisma były telefonowe. Układ desktopowy ocalał przypadkiem, bo
+ * późniejszy blok nadpisań wpisywał kolumny jeszcze raz; paska nie przywracał nikt, bo w
+ * referencji nie ma czego przywracać.
+ *
+ * Czego to NIE złapało: ani testy jednostkowe (`renderToStaticMarkup` nie ładuje CSS), ani
+ * suita e2e (pasek JEST w HTML-u, tylko niewidoczny), ani `studio_style.test.ts` (pilnuje
+ * reguł, które są, a nie tego, w jakim kontekście obowiązują). Złapał pierwszy zrzut ekranu,
+ * i to jest dokładnie ten trzeci sposób sprawdzania, o którym mówi KONWENCJE: zrzut widzi to,
+ * czego nie widać w HTML-u.
+ *
+ * Dlatego ten arkusz jest dziś GENEROWANY z referencji w całości, a nie wybierany ręcznie:
+ * kolejność, opakowania i deklaracje są takie, jak w przeglądarce nad makietą. Reguły
+ * dotyczące elementów, których Studio nie renderuje, po prostu w nic nie trafiają.
+ */
+
+/* --- reguły z referencji, w kolejności źródła. NIE EDYTOWAĆ RĘCZNIE --- */
+
+.st{--wm-ink:#000;--wm-white:#fff;--wm-muted:#767271;--wm-tint:1;--wm-speed:420ms;--wm-radius:24px;font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;font-size:14px;font-weight:400;line-height:1.5;color:#000;color-scheme:light;isolation:isolate;width:100%;text-align:left}
+.st *{box-sizing:border-box}
+.st button,.st input,.st textarea,.st select{font:inherit;color:inherit}
+.st button{cursor:pointer;-webkit-tap-highlight-color:transparent}
+.st button{border:0;background:transparent}
+.st h1,.st h2,.st h3,.st p{margin:0;font-weight:400}
+.st svg{width:16px;height:16px;stroke-width:1.5;flex-shrink:0}
+.st [hidden]{display:none!important}
+.st .wm-shell{position:relative;min-height:680px;border-radius:26px;background:#faf8f5;overflow:clip;border:1px solid #eae4e2;box-shadow:inset 0 0 0 5px #ffffff65}
+.st .wm-shell:before{content:"";position:absolute;inset:0;background:linear-gradient(155deg,#f3ebfd 0%,#f7edf1 46%,#fdefe2 100%);opacity:var(--wm-tint);pointer-events:none}
+.st .wm-scene{position:relative;display:grid;grid-template-columns:190px minmax(0,1fr);min-height:680px;transition:filter var(--wm-speed) ease,transform var(--wm-speed) cubic-bezier(.22,.7,.1,1);transform-origin:50% 70%}
+.st .wm-sidebar{display:flex;flex-direction:column;padding:37px 23px 131px 34px;min-width:0}
+.st .wm-wordmark{font-size:21px;letter-spacing:-1.2px;text-align:left;padding:0;width:max-content}
+.st .wm-brand-host{display:flex;align-items:center;width:42px;height:37px}
+.st .wm-logo{display:inline-block;position:relative;width:1.23em;height:1em;font-size:30px;mix-blend-mode:multiply;vertical-align:middle}
+.st .wm-logo-piece{position:absolute;top:0;width:33.3334%;height:100%;overflow:hidden;transform-origin:center 58%;mix-blend-mode:multiply}
+.st .wm-logo-piece:nth-child(1){left:0}
+.st .wm-logo-piece:nth-child(2){left:33.3333%}
+.st .wm-logo-piece:nth-child(3){left:66.6666%}
+.st .wm-logo-piece img{position:absolute;max-width:none;width:2.052em;height:2.052em;top:-.5205em;left:-.4206em;filter:contrast(14);mix-blend-mode:multiply}
+.st .wm-logo-piece:nth-child(2) img{left:-.8306em}
+.st .wm-logo-piece:nth-child(3) img{left:-1.2406em}
+.st .wm-logo-assemble .wm-logo-piece{animation:wm-logo-assemble 680ms cubic-bezier(.2,.7,.15,1) both}
+.st .wm-logo-assemble .wm-logo-piece:nth-child(2){animation-delay:90ms}
+.st .wm-logo-assemble .wm-logo-piece:nth-child(3){animation-delay:180ms}
+.st .wm-thinking{display:flex;align-items:center;min-height:29px;width:max-content}
+.st .wm-thinking .wm-logo{font-size:18px}
+.st .wm-thinking .wm-logo-piece{animation:wm-logo-wave 1600ms cubic-bezier(.4,0,.2,1) infinite}
+.st .wm-thinking .wm-logo-piece:nth-child(2){animation-delay:150ms}
+.st .wm-thinking .wm-logo-piece:nth-child(3){animation-delay:300ms}
+@keyframes wm-logo-assemble{from{opacity:0;transform:translateY(8px) scaleY(.2)}to{opacity:1;transform:translateY(0) scaleY(1)}}
+@keyframes wm-logo-wave{0%,70%,100%{transform:translateY(1px) scaleY(.7)}35%{transform:translateY(-1px) scaleY(1.09)}}
+.st .wm-navigation{display:grid;gap:9px;justify-items:start;margin-top:102px}
+.st .wm-navigation :is(button, a.st__item){font-size:12px;color:#88817f;border-radius:25px;padding:8px 15px;transition:color 180ms ease,background-color 180ms ease}
+.st .wm-navigation :is(button, a.st__item):hover{color:#000}
+.st .wm-navigation :is(button, a.st__item).wm-selected{color:#000;background:#00000006}
+.st .wm-projects{display:grid;align-content:start;gap:11px;margin:43px 0 0 15px}
+.st .wm-projects :is(button, a.st__item){text-align:left;font-size:11px;line-height:1.55;padding:3px 0;color:#827d7c;max-width:100%;overflow-wrap:anywhere;transition:color 180ms ease}
+.st .wm-projects :is(button, a.st__item):hover,.st .wm-projects :is(button, a.st__item)[aria-current="page"]{color:#000}
+.st .wm-workspace-label{font-size:11px;color:#878080;margin: auto 0 0 15px;padding-top:35px}
+.st .wm-workspace-label span{display:block;font-size:10px;color:#918782;margin-top:4px}
+.st .wm-main{min-width:0;display:flex;flex-direction:column;padding:26px 36px 27px 18px}
+.st .wm-header{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:35px}
+.st .wm-breadcrumb{font-size:11px;color:#827c7b}
+.st .wm-circle{width:31px;height:31px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;padding:8px;background:#00000004;transition:background-color 180ms ease,transform 180ms ease}
+.st .wm-circle:hover{background:#0000000a}
+.st .wm-circle:active{transform:scale(.94)}
+.st .wm-mobile-nav{display:none}
+.st .wm-content{display:flex;flex-direction:column;flex:1;min-width:0}
+.st .wm-chat{max-width:610px;width:100%;margin:0 auto;display:flex;flex-direction:column;flex:1;padding-top:40px}
+.st .wm-chat h1{font-size:28px;letter-spacing:-1px;line-height:1.3;margin-bottom:36px}
+.st .wm-messages{display:flex;flex-direction:column;gap:25px}
+.st .wm-message-user{background:#ffffff85;padding:17px 20px;border-radius:19px 19px 5px 19px;max-width:87%;align-self:flex-end;font-size:14px;line-height:1.7}
+.st .wm-message-agent{max-width:92%;font-size:15px;line-height:1.85;letter-spacing:-.15px}
+.st .wm-result-link{display:flex;align-items:center;gap:9px;color:#716c69;font-size:12px;padding:0;width:max-content;max-width:100%;margin-top:14px}
+.st .wm-result-link svg{width:13px;height:13px}
+.st .wm-result-link:hover{color:#000}
+.st .wm-bottom{margin-top:auto;padding-top:45px}
+.st .wm-activity{display:flex;align-items:center;gap:7px;font-size:11px;color:#78736e;padding:7px 2px;margin:0 0 10px}
+.st .wm-activity svg{width:12px;height:12px;margin-left:5px}
+.st .wm-dot{width:4px;height:4px;background:#000;border-radius:50%;display:inline-block;flex-shrink:0}
+.st .wm-composer{background:#fff;border-radius:var(--wm-radius);padding:18px 18px 14px;box-shadow:0 7px 25px #62534b04}
+.st .wm-composer textarea{display:block;width:100%;resize:vertical;min-height:47px;max-height:180px;border:0;background:transparent;padding:1px 0;font-size:14px;line-height:1.7;color:#000}
+.st .wm-composer textarea::placeholder{color:#989391}
+.st .wm-composerbar{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
+.st .wm-composerbar .wm-circle{background:transparent}
+.st .wm-engine-button{display:flex;align-items:center;gap:5px;font-size:11px;color:#8e8885;padding:4px 0;margin-left:auto}
+.st .wm-engine-button svg{width:11px;height:11px}
+.st .wm-send{background:#000;color:#fff;border:0;width:29px;height:29px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;transition:transform 180ms ease}
+.st .wm-send:hover{transform:translateY(-2px)}
+.st .wm-send:active{transform:scale(.94)}
+.st .wm-dock{position:absolute;left:45px;bottom:29px;display:flex;flex-direction:column;gap:12px;z-index:6}
+.st .wm-avatar{width:30px;height:30px;border-radius:50%;color:#fff;background:#000;font-size:10px;display:flex;align-items:center;justify-content:center}
+.st .wm-launch{background:#00000004;transition:background-color var(--wm-speed),color var(--wm-speed)}
+.st .wm-launch svg{transition:transform var(--wm-speed) cubic-bezier(.22,.7,.1,1)}
+.st.wm-tools-open .wm-launch{background:#000;color:#fff}
+.st.wm-tools-open .wm-launch svg{transform:rotate(135deg)}
+.st.wm-tools-open .wm-scene{filter:blur(8px);transform:scale(.988)}
+.st .wm-launch-backdrop{position:absolute;inset:0;z-index:3;cursor:default}
+.st .wm-launcher{position:absolute;bottom:71px;left:93px;display:flex;gap:9px;z-index:5}
+.st .wm-action-tile{display:flex;flex-direction:column;align-items:flex-start;justify-content:space-between;gap:22px;width:106px;min-height:123px;background:#c7beb7c9;border-radius:10px;padding:17px 14px;text-align:left;font-size:16px;line-height:1.08;letter-spacing:-.4px;opacity:0;transform:translateY(28px) scale(.94);transition:background-color 210ms ease,transform var(--wm-speed) cubic-bezier(.2,.75,.15,1),opacity var(--wm-speed) ease}
+.st.wm-tools-open .wm-action-tile{opacity:1;transform:translateY(0) scale(1)}
+.st .wm-action-tile:nth-child(2){transition-delay:0ms,30ms,30ms}
+.st .wm-action-tile:nth-child(3){transition-delay:0ms,60ms,60ms}
+.st .wm-action-tile:nth-child(4){transition-delay:0ms,90ms,90ms}
+.st .wm-action-tile:hover{background:#fff}
+.st .wm-page{max-width:680px;width:100%;margin:61px auto 0;flex:1}
+.st .wm-page-head{display:flex;justify-content:space-between;align-items:center;gap:15px;margin-bottom:37px}
+.st .wm-page h1{font-size:29px;letter-spacing:-1.15px;line-height:1.3}
+.st .wm-surface{background:#fff;border-radius:var(--wm-radius);padding:11px 25px}
+.st .wm-row{display:flex;align-items:center;gap:14px;width:100%;padding:23px 0;text-align:left;min-width:0}
+.st .wm-row+.wm-row{border-top:1px solid #00000006}
+.st .wm-platform{width:30px;height:30px;display:flex;align-items:center;justify-content:center;background:#000;color:#fff;font-size:12px;border-radius:50%;flex-shrink:0}
+.st .wm-row strong{font-size:13px;font-weight:400;display:block}
+.st .wm-row small{font-size:11px;color:#918c89;display:block;margin-top:2px}
+.st .wm-row-metric{margin-left:auto;text-align:right;font-size:19px;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
+.st .wm-row-metric small{font-size:11px;letter-spacing:0}
+.st .wm-row>svg{margin-left:auto;color:#a29c98;width:13px;height:13px;transition:transform 180ms ease}
+.st .wm-row:hover>svg{transform:translateX(3px);color:#000}
+.st .wm-footnote{font-size:11px;color:#918882;margin:15px 2px 0}
+.st .wm-overlay{position:absolute;inset:0;z-index:10;pointer-events:none}
+.st .wm-dialog{position:absolute;max-width:calc(100% - 24px);width:320px;background:#fff;border-radius:21px;padding:24px;box-shadow:0 12px 45px #67544913,0 2px 8px #67544907;pointer-events:auto;opacity:0;filter:blur(3px);transform:translate(var(--wm-from-x,0px),var(--wm-from-y,9px)) scale(.97);transform-origin:var(--wm-origin-x,50%) var(--wm-origin-y,0%);transition:opacity var(--wm-speed) ease,filter var(--wm-speed) ease,transform var(--wm-speed) cubic-bezier(.2,.75,.15,1),left var(--wm-speed) cubic-bezier(.2,.75,.15,1),top var(--wm-speed) cubic-bezier(.2,.75,.15,1)}
+.st .wm-dialog h2{font-size:20px;line-height:1.25;letter-spacing:-.6px;margin:3px 24px 20px 0}
+.st .wm-dialog h3{font-size:12px;color:#827a76;margin:24px 0 12px}
+.st .wm-dialog p{font-size:13px;line-height:1.8;color:#6f6864;margin:12px 0}
+.st .wm-close{position:absolute;top:14px;right:14px;background:transparent}
+.st .wm-choice{display:flex;align-items:center;justify-content:space-between;gap:15px;width:100%;padding:14px 0;font-size:13px;text-align:left}
+.st .wm-choice small{display:block;font-size:11px;color:#8f8681;margin-top:3px}
+.st .wm-choice svg{width:13px;height:13px}
+.st .wm-choice+.wm-choice{border-top:1px solid #00000006}
+.st .wm-subtle{color:#7f7671;font-size:11px}
+.st .wm-dialog label{display:block;font-size:12px;color:#7e746e;margin:20px 0 7px}
+.st .wm-dialog input{border:0;background:#f7f5f3;border-radius:12px;padding:12px 14px;width:100%;min-width:0;font-size:14px}
+.st .wm-primary{background:#000;color:#fff;padding:11px 18px;border-radius:25px;font-size:12px;display:inline-flex;justify-content:center;align-items:center;gap:9px;margin-top:23px}
+.st .wm-timeline{list-style:none;padding:0;margin:28px 0 20px}
+.st .wm-timeline li{display:grid;grid-template-columns:43px 1fr;gap:12px;padding:0 0 24px;align-items:start}
+.st .wm-timeline time{font-size:11px;color:#928a85;padding-top:2px;font-variant-numeric:tabular-nums}
+.st .wm-timeline strong{display:block;font-weight:400;font-size:13px}
+.st .wm-timeline small{display:block;font-size:11px;color:#958b85;margin-top:3px}
+.st .wm-split{display:flex;justify-content:space-between;align-items:center;gap:13px}
+.st .wm-text-button{font-size:11px;color:#77706a;padding:5px 0}
+.st .wm-text-button:hover{color:#000}
+.st .wm-status-text{font-size:11px;color:#7e756e;display:flex;align-items:center;gap:7px}
+.st .wm-disclosure{font-size:11px;color:#8b8079;margin:15px 0}
+.st .wm-disclosure summary{cursor:pointer}
+.st .wm-disclosure p{font-size:11px}
+.st .wm-toast{position:absolute;max-width:calc(100% - 24px);z-index:12;background:#000;color:#fff;font-size:12px;padding:10px 17px;border-radius:22px;text-align:center;opacity:0;transform:translateY(5px) scale(.97);transition:opacity 240ms ease,transform 300ms cubic-bezier(.2,.75,.15,1);pointer-events:none}
+.st .wm-toast.wm-toast-visible{opacity:1;transform:translateY(0) scale(1)}
+.st .wm-empty{padding:20px 0;color:#8d827a;font-size:13px}
+.st.wm-sheet-open .wm-dialog{opacity:1;filter:blur(0);transform:translate(0,0) scale(1)}
+.st .wm-panel-change>*{animation:wm-detail-in var(--wm-speed) cubic-bezier(.2,.75,.15,1) both}
+.st .wm-panel-change>:nth-child(2){animation-delay:25ms}
+.st .wm-panel-change>:nth-child(3){animation-delay:45ms}
+.st .wm-panel-change>:nth-child(n+4){animation-delay:65ms}
+.st .wm-page-change{animation:wm-page-in var(--wm-speed) cubic-bezier(.2,.75,.15,1)}
+.st .wm-disclosure[open]>p{animation:wm-detail-in var(--wm-speed) cubic-bezier(.2,.75,.15,1) both}
+@keyframes wm-detail-in{from{opacity:0;filter:blur(2px);transform:translateY(6px)}to{opacity:1;filter:blur(0);transform:translateY(0)}}
+@keyframes wm-page-in{from{opacity:0;filter:blur(2px);transform:translateY(9px)}to{opacity:1;filter:blur(0);transform:translateY(0)}}
+@media(max-width:800px){
+  .st .wm-scene{grid-template-columns:158px minmax(0,1fr)}
+  .st .wm-sidebar{padding-left:22px;padding-right:13px}
+  .st .wm-main{padding-right:25px}
+  .st .wm-dock{left:33px}
+  .st .wm-launcher{left:81px}
+  .st .wm-action-tile{width:92px;min-height:113px;font-size:14px}
+  .st .wm-chat h1{font-size:25px}
+  .st .wm-chat{padding-top:51px}
+}
+@media(max-width:580px){
+  .st .wm-shell{border-radius:22px;min-height:735px}
+  .st .wm-scene{grid-template-columns:minmax(0,1fr);min-height:735px}
+  .st .wm-sidebar{display:none}
+  .st.wm-nav-open .wm-sidebar{display:flex;position:absolute;inset:0 auto 0 0;width:210px;z-index:2;background:#f7eef0;border-radius:22px 0 0 22px;padding-left:26px}
+  .st.wm-nav-open .wm-main{opacity:.3;pointer-events:none}
+  .st .wm-mobile-nav{display:flex}
+  .st .wm-breadcrumb{margin-right:auto;font-size:11px}
+  .st .wm-header{gap:8px}
+  .st .wm-main{padding:19px 21px 93px}
+  .st .wm-chat{padding-top:39px}
+  .st .wm-chat h1{font-size:25px;margin-bottom:31px}
+  .st .wm-message-user{font-size:13px;max-width:93%;padding:14px 17px}
+  .st .wm-message-agent{font-size:14px;max-width:100%}
+  .st .wm-bottom{padding-top:45px}
+  .st .wm-composer{padding:16px 14px 12px}
+  .st .wm-composer textarea{font-size:16px}
+  .st .wm-dock{left:25px;bottom:23px;flex-direction:row;gap:13px}
+  .st .wm-launcher{left:25px;right:25px;bottom:78px;display:grid;grid-template-columns:1fr 1fr;gap:9px}
+  .st .wm-action-tile{width:100%;min-height:107px;font-size:15px}
+  .st .wm-overlay{padding:75px 15px 30px}
+  .st .wm-dialog{padding:26px 23px}
+  .st .wm-page{margin-top:39px}
+  .st .wm-surface{padding:8px 18px}
+  .st .wm-row{gap:11px}
+  .st .wm-row small{font-size:10px}
+  .st .wm-row-metric{font-size:17px}
+  .st .wm-page-head{margin-bottom:25px}
+  .st .wm-workspace-label{margin-top:45px}
+}
+@media(pointer:coarse){
+  .st .wm-circle,.st .wm-send,.st .wm-avatar{min-width:44px;min-height:44px}
+  .st .wm-navigation :is(button, a.st__item),.st .wm-projects :is(button, a.st__item),.st .wm-text-button,.st .wm-activity{min-height:44px}
+  .st .wm-dialog input{font-size:16px}
+  .st .wm-launcher{bottom:88px}
+}
+.st .wm-overlay{padding:0}
+@media(max-width:580px){
+  .st .wm-dialog{padding:22px 20px;border-radius:19px}
+}
+@media(prefers-reduced-motion:reduce){
+  .st *,.st *:before{animation:none!important;transition:none!important;scroll-behavior:auto!important}
+}
+/* Dark studio: the reference's clarity, with the existing quiet motion. */
+.st{--wm-ink:#f3f3f1;--wm-white:#121212;--wm-muted:#939390;--wm-accent:#d3e4af;--wm-radius:20px;color:var(--wm-ink);color-scheme:dark}
+.st .wm-shell{min-height:760px;background:#080808;border:1px solid #202020;box-shadow:none;border-radius:24px}
+.st .wm-shell:before{display:none}
+.st .wm-scene{grid-template-columns:220px minmax(0,1fr);min-height:760px}
+.st .wm-sidebar{padding:25px 15px 97px 22px;background:#0b0b0b;border-right:1px solid #ffffff06}
+.st .wm-sidebar-top{display:flex;align-items:center;gap:14px;margin-bottom:51px}
+.st .wm-brand-host{width:30px;height:33px;flex-shrink:0}
+.st .wm-logo{font-size:25px;mix-blend-mode:screen}
+.st .wm-logo-piece{mix-blend-mode:screen}
+.st .wm-logo-piece img{filter:contrast(14) invert(1);mix-blend-mode:screen}
+.st .wm-workspace-switch{display:flex;align-items:center;justify-content:space-between;gap:17px;min-width:0;padding:8px 0;font-size:14px;letter-spacing:-.2px;text-align:left;flex:1}
+.st .wm-workspace-switch span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.st .wm-workspace-switch svg{width:12px;color:#777}
+.st .wm-nav-label{display:flex;align-items:center;justify-content:space-between;padding:0 9px;margin-bottom:10px;color:#727270;font-size:11px}
+.st .wm-nav-label .wm-circle{width:24px;height:24px;padding:5px}
+.st .wm-projects{margin:0;gap:4px}
+.st .wm-projects :is(button, a.st__item){display:flex;align-items:center;gap:9px;border-radius:9px;padding:9px 10px;font-size:12px;color:#a6a6a2;line-height:1.4;transition:background-color 220ms ease,color 220ms ease}
+.st .wm-projects :is(button, a.st__item)[aria-current="page"]{background:#1b1b1b;color:#f3f3f1}
+.st .wm-projects :is(button, a.st__item):hover{color:#fff;background:#171717}
+.st .wm-projects :is(button, a.st__item) span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.st .wm-project-dot{width:5px;height:5px;border-radius:50%;background:#575753;flex-shrink:0}
+.st .wm-project-dot.is-active{background:var(--wm-accent)}
+.st .wm-project-label{margin-top:34px}
+.st .wm-navigation{margin-top:0;gap:4px;justify-items:stretch}
+.st .wm-navigation :is(button, a.st__item){display:flex;align-items:center;gap:10px;border-radius:9px;padding:9px 10px;font-size:12px;color:#989894;text-align:left;transition:color 200ms ease,background-color 200ms ease}
+.st .wm-navigation :is(button, a.st__item) svg{width:14px;height:14px;color:#7f7f7a}
+.st .wm-navigation :is(button, a.st__item):hover{color:#eee;background:#121212}
+.st .wm-navigation :is(button, a.st__item).wm-selected{color:#f5f5f2;background:#1b1b1b}
+.st .wm-navigation :is(button, a.st__item).wm-selected svg{color:#d2d2ce}
+.st .wm-global-nav{margin-top:34px;padding-top:18px;border-top:1px solid #ffffff08}
+.st .wm-workspace-label{font-size:11px;margin:0 10px;padding-top:21px;color:#72726f}
+.st .wm-workspace-label span{font-size:11px;color:#60605d}
+.st .wm-dock{left:32px;bottom:25px;flex-direction:row;align-items:center;gap:13px}
+.st .wm-avatar{background:#292927;color:#deded8}
+.st .wm-main{padding:23px 30px 27px;min-width:0}
+.st .wm-header{gap:13px;min-height:36px}
+.st .wm-breadcrumb{color:#797977;font-size:11px;margin-right:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.st .wm-header-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.st .wm-mode-button{display:flex;align-items:center;gap:7px;padding:7px 11px;background:#151515;color:#c8c8c3;border-radius:9px;font-size:11px;transition:background-color 200ms ease}
+.st .wm-mode-button:hover{background:#202020}
+.st .wm-mode-button .wm-dot{background:var(--wm-accent)}
+.st .wm-circle{background:#151515;color:#a9a9a3}
+.st .wm-circle:hover{background:#222;color:#f5f5f2}
+.st .wm-circle svg{width:14px;height:14px}
+.st .wm-chat{max-width:670px;padding-top:50px}
+.st .wm-chat h1{font-size:29px;letter-spacing:-1px;margin-bottom:12px;color:#f4f4f1}
+.st .wm-project-meta{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:40px}
+.st .wm-assignment-link{display:inline-flex;align-items:center;gap:7px;font-size:11px;color:#92928c;padding:0;text-align:left}
+.st .wm-assignment-link svg{width:12px;height:12px}
+.st .wm-assignment-link:hover{color:#ddd}
+.st .wm-messages{gap:25px}
+.st .wm-message-user{background:#171717;color:#deded9;font-size:14px;padding:16px 19px;border-radius:18px 18px 5px 18px;max-width:86%}
+.st .wm-message-agent{color:#d4d4cf;font-size:15px;line-height:1.85}
+.st .wm-message-agent p{margin:0}
+.st .wm-result-link{color:#85857f;transition:color 200ms ease}
+.st .wm-result-link:hover{color:#eee}
+.st .wm-bottom{padding-top:65px}
+.st .wm-activity{color:#96968d;margin-bottom:8px;width:100%;font-size:11px;gap:7px;padding:10px 2px}
+.st .wm-activity time{margin-left:auto;font-size:11px;color:#62625e}
+.st .wm-dot{background:var(--wm-accent)}
+.st .wm-composer{background:#141414;box-shadow:none;padding:19px 19px 14px}
+.st .wm-composer textarea{color:#eeeeea;min-height:51px}
+.st .wm-composer textarea::placeholder{color:#666661}
+.st .wm-composerbar .wm-circle{color:#979790}
+.st .wm-engine-button{color:#84847d;font-size:11px}
+.st .wm-send{color:#111;background:#e9e9e3}
+.st .wm-launch{background:#1b1b1b;color:#c5c5be}
+.st.wm-tools-open .wm-launch{background:#e9e9e3;color:#080808}
+.st .wm-launcher{left:79px;bottom:25px;gap:8px}
+.st .wm-action-tile{background:#242423;color:#d6d6cf;border-radius:12px;width:111px;min-height:126px}
+.st .wm-action-tile:hover{background:#eeeae3;color:#0b0b0b}
+.st .wm-page{margin-top:50px;max-width:720px}
+.st .wm-page-head{margin-bottom:28px;align-items:flex-start}
+.st .wm-page h1{font-size:29px;line-height:1.3;color:#f4f4f1}
+.st .wm-page-subtitle{font-size:12px;color:#777771;margin-top:8px}
+.st .wm-surface{background:#131313;padding:6px 22px}
+.st .wm-row{color:#d8d8d2;padding:21px 0;transition:opacity 200ms ease}
+.st .wm-row strong{font-size:13px;color:#ddddd7}
+.st .wm-row small{color:#85857f;font-size:11px;overflow-wrap:anywhere}
+.st .wm-row+.wm-row{border-color:#ffffff08}
+.st .wm-row>svg{color:#6f6f67}
+.st .wm-row:hover>svg{color:#ccc}
+.st .wm-platform{background:#242423;color:#e7e7e0;border-radius:10px;width:32px;height:32px}
+.st .wm-footnote{color:#6e6e67;font-size:11px}
+.st .wm-row-metric{font-size:20px;color:#e8e8e1}
+.st .wm-people-tabs{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:24px}
+.st .wm-person-tab{display:flex;align-items:center;gap:9px;padding:8px 12px 8px 8px;border-radius:12px;color:#8a8a83;font-size:12px;transition:background-color 200ms ease,color 200ms ease}
+.st .wm-person-tab[aria-pressed="true"]{background:#1c1c1b;color:#f1f1ea}
+.st .wm-person-tab:hover{color:#f1f1ea}
+.st .wm-person-avatar{width:27px;height:27px;border-radius:50%;background:#2c2c29;color:#d7d7cb;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0}
+.st .wm-person-tab:nth-child(even) .wm-person-avatar{background:#26292c;color:#b9c4ca}
+.st .wm-person-head{display:flex;align-items:center;gap:12px;margin-bottom:21px;min-width:0}
+.st .wm-person-head h2{font-size:20px;color:#ededE7;letter-spacing:-.45px}
+.st .wm-person-head p{font-size:11px;color:#797971;margin-top:2px}
+.st .wm-person-head>.wm-circle{margin-left:auto;flex-shrink:0}
+.st .wm-person-head .wm-person-avatar{width:36px;height:36px;font-size:13px}
+.st .wm-account-handle{min-width:0;flex:1}
+.st .wm-account-handle strong{overflow-wrap:anywhere}
+.st .wm-row-metric{flex-shrink:0}
+.st .wm-person-body{animation:wm-detail-in var(--wm-speed) cubic-bezier(.2,.75,.15,1) both}
+.st .wm-dialog{background:#1a1a19;color:#e6e6de;box-shadow:0 18px 70px #0008,0 0 0 1px #ffffff0b;border-radius:18px}
+.st .wm-dialog h2{font-size:19px;color:#f1f1e9}
+.st .wm-dialog h3{color:#909087}
+.st .wm-dialog p{color:#98988d}
+.st .wm-dialog .wm-close{background:transparent}
+.st .wm-choice{color:#dcdcd3;font-size:12px;transition:color 180ms ease}
+.st button.wm-choice:hover{color:#fff}
+.st .wm-choice small{color:#8a8a80;overflow-wrap:anywhere}
+.st .wm-choice+.wm-choice{border-color:#ffffff08}
+.st .wm-choice svg{color:#9d9d91}
+.st .wm-dialog label{color:#aaaA9f}
+.st .wm-dialog input,.st .wm-dialog select{background:#252523;color:#eeeee4;border:0;border-radius:10px;padding:11px 12px;width:100%;min-width:0;font-size:13px}
+.st .wm-primary{background:#eaeae2;color:#111}
+.st .wm-text-button{color:#a1a193}
+.st .wm-text-button:hover{color:#f4f4e9}
+.st .wm-subtle,.st .wm-status-text,.st .wm-disclosure{color:#909084}
+.st .wm-timeline strong{color:#ddddd1}
+.st .wm-timeline time,.st .wm-timeline small{color:#838376}
+.st .wm-toast{background:#e5e5db;color:#12120d}
+.st .wm-empty{color:#87877b;padding:15px 0}
+.st .wm-assignment-person{font-size:11px;color:#86867c;margin:19px 0 4px}
+.st .wm-assignment-row{display:flex;align-items:center;gap:11px;width:100%;padding:11px 0;text-align:left;font-size:12px;color:#dbdbd0}
+.st .wm-assignment-row .wm-platform{width:27px;height:27px;border-radius:8px;font-size:10px}
+.st .wm-assignment-row small{display:block;font-size:11px;color:#828276;margin-top:2px}
+.st .wm-assignment-row>svg{margin-left:auto;color:#d6dbc1;width:14px;height:14px}
+.st .wm-assignment-row[aria-pressed="false"]>svg{color:#4a4a42}
+.st .wm-detail-meta{display:flex;align-items:center;gap:7px;font-size:11px;color:#838375;margin-bottom:12px}
+.st .wm-story{padding:22px 0}
+.st .wm-story+.wm-story{border-top:1px solid #ffffff09}
+.st .wm-story p{font-size:14px;color:#c8c8bc;line-height:1.8;margin:11px 0}
+.st .wm-story button{font-size:11px;color:#8d8d80;padding:0}
+.st .wm-story h2{font-size:16px;color:#dfdfd4}
+.st .wm-assign-summary{padding:4px 0 16px;font-size:11px;color:#909081}
+@media(max-width:1000px){
+  .st .wm-scene{grid-template-columns:198px minmax(0,1fr)}
+  .st .wm-sidebar{padding-left:17px}
+  .st .wm-main{padding-left:24px;padding-right:24px}
+  .st .wm-projects :is(button, a.st__item){font-size:11px}
+  .st .wm-chat h1{font-size:27px}
+}
+@media(max-width:760px){
+  .st .wm-scene{grid-template-columns:176px minmax(0,1fr)}
+  .st .wm-sidebar{padding-left:10px;padding-right:10px}
+  .st .wm-sidebar-top{gap:9px}
+  .st .wm-main{padding-left:20px;padding-right:20px}
+  .st .wm-header{gap:7px}
+  .st .wm-breadcrumb{font-size:10px}
+  .st .wm-mode-button{padding:7px 8px;font-size:10px}
+  .st .wm-navigation :is(button, a.st__item){font-size:11px}
+  .st .wm-launcher{left:72px}
+  .st .wm-action-tile{width:91px}
+}
+@media(max-width:580px){
+  .st .wm-scene{grid-template-columns:minmax(0,1fr);min-height:760px}
+  .st .wm-shell{min-height:760px;border-radius:20px}
+  .st .wm-main{padding:20px 20px 94px}
+  .st .wm-breadcrumb{display:none}
+  .st .wm-header-actions{margin-left:auto}
+  .st .wm-mode-button{font-size:11px}
+  .st .wm-header-actions>.wm-circle{display:none}
+  .st.wm-nav-open .wm-sidebar{background:#111;width:222px;padding:25px 16px 98px 22px;z-index:2;box-shadow:20px 0 60px #0007;animation:wm-detail-in var(--wm-speed) ease}
+  .st .wm-chat{padding-top:38px}
+  .st .wm-chat h1{font-size:25px}
+  .st .wm-project-meta{margin-bottom:31px}
+  .st .wm-message-user{max-width:96%;font-size:13px}
+  .st .wm-message-agent{font-size:14px}
+  .st .wm-composer{padding:17px 14px 13px}
+  .st .wm-composer textarea{font-size:16px}
+  .st .wm-activity{font-size:10px;flex-wrap:wrap}
+  .st .wm-activity time{display:none}
+  .st .wm-page{margin-top:38px}
+  .st .wm-page h1{font-size:26px}
+  .st .wm-surface{padding:6px 15px}
+  .st .wm-row{gap:10px}
+  .st .wm-row-metric{font-size:18px}
+  .st .wm-dock{left:27px;bottom:24px}
+  .st .wm-launcher{left:25px;right:25px;bottom:80px;grid-template-columns:1fr 1fr}
+  .st .wm-action-tile{width:100%;min-height:111px}
+  .st .wm-row small{font-size:11px}
+  .st .wm-person-tab{padding-right:10px}
+  .st .wm-dialog{padding:22px 20px}
+  .st .wm-workspace-label{margin:0 10px}
+}
+@media(pointer:coarse){
+  .st .wm-workspace-switch,.st .wm-mode-button,.st .wm-person-tab,.st .wm-assignment-link{min-height:44px}
+  .st .wm-dialog input,.st .wm-dialog select{font-size:16px}
+}
+
+/*
+ * JEDYNA REGUŁA SPOZA REFERENCJI, i jest adapterem, nie decyzją wyglądu.
+ *
+ * `.st` było siatką dwukolumnową starego studia i samo rysowało pasek. Rama z referencji ma
+ * własny pasek wewnątrz `.wm-scene`, więc zewnętrzna siatka musi zejść z drogi; bez tego
+ * kolumny są dwie, jedna w drugiej, i szerokość treści wychodzi z niewłaściwej.
+ */
+.st.st--framed{display:block;grid-template-columns:none;background:transparent}

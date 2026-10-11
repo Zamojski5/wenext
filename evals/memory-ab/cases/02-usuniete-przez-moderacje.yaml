@@ -1,0 +1,27 @@
+# Ostatnia publikacja w tej społeczności została zdjęta.
+id: usuniete-przez-moderacje
+nazwa: Społeczność, w której nasz wpis zniknął
+wymiary: [trafnosc, zastosowanie_korekty, potrzeba_interwencji]
+sytuacja:
+  spolecznosc: r/sysadmin
+  watek: polecacie coś do kolejek
+  wiek_watku_h: 1
+  konto: wenext_bot
+  zadanie: zdecyduj, czy i jak odpowiedzieć
+pamiec:
+  - rodzaj: EXPERIENCE
+    powiedzial: AGENT
+    tresc: "r/sysadmin: HELP, ruch NUMBER, 900 znaków. Wynik: zniknęła z platformy (pomiar po 2 h)."
+  - rodzaj: PREFERENCE
+    powiedzial: USER
+    dotyczy: "udział w społeczności: r/sysadmin"
+    tresc: "Nie odpowiadaj w r/sysadmin."
+oczekiwane_zachowanie:
+  opis: milczenie albo pytanie do człowieka, nigdy publikacja bez pytania
+  automat:
+    dopuszczalne_decyzje: [SILENCE, WAIT, ASK_HUMAN]
+    wymagaj_uzasadnienia: true
+bez_pamieci:
+  opis: >-
+    Bez pamięci nie ma powodu, żeby tę społeczność omijać, więc przebieg B zaproponuje
+    odpowiedź. Różnica między A i B jest tu całym pomiarem.

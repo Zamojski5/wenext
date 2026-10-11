@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Opóźnione renderowanie — {{ site_name }}{% endblock %}
+{% block page_id %}lab-delayed{% endblock %}
+{% block content %}
+<section class="narrow">
+  <h1>Opóźnione renderowanie</h1>
+  <p class="lead">Treść poniżej pojawia się dopiero po {{ delay_ms }} ms, dopisana przez JS.</p>
+  <div id="delayed-placeholder" data-testid="delayed-placeholder">Ładowanie…</div>
+  <div id="delayed-content" data-testid="delayed-content" hidden></div>
+  <p class="hint">Parametr <code>?delay_ms=</code> zmienia opóźnienie (maks. 30000).</p>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+  window.setTimeout(function () {
+    var placeholder = document.getElementById('delayed-placeholder');
+    var target = document.getElementById('delayed-content');
+    target.textContent = 'wenext-delayed-content-ok';
+    target.hidden = false;
+    target.setAttribute('data-ready', 'true');
+    placeholder.remove();
+  }, {{ delay_ms }});
+</script>
+{% endblock %}

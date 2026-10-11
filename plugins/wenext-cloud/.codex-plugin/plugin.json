@@ -1,0 +1,32 @@
+{
+  "name": "wenext-cloud",
+  "version": "0.1.0",
+  "description": "Finds the first users for what you built. Reads your code, finds people on Reddit who are describing the problem it solves right now and drafts replies in your voice. Runs in the cloud, nothing to install; you post each reply yourself.",
+  "author": {
+    "name": "Wenext"
+  },
+  "repository": "https://github.com/Zamojski5/wenext",
+  "keywords": [
+    "marketing",
+    "reddit",
+    "community",
+    "founders",
+    "distribution"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Wenext",
+    "shortDescription": "Find the first users for what you built",
+    "longDescription": "In about five minutes Wenext reads your code, finds people on Reddit who are describing the problem your product solves right now, and prepares replies in your voice. It runs in the cloud: sign in once in the browser and there is nothing else to install. Wenext never posts for you. You press one button on the card, paste the reply in the thread and post it from your own account. X is not available yet.",
+    "developerName": "Wenext",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Find my first users: read my code, find people on Reddit who need it, draft replies in my voice.",
+      "I posted the first reply."
+    ]
+  }
+}

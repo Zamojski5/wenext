@@ -1,0 +1,62 @@
+{
+  "input": {
+    "id": "demo-e2",
+    "source": {
+      "platform": "HACKER_NEWS",
+      "external_id": "synthetic-90000002",
+      "url": "https://news.ycombinator.com/item?id=90000002",
+      "thread_ref": null
+    },
+    "captured_at": "2026-09-02T15:20:00+00:00",
+    "community": {"display_name": "Hacker News, Ask HN", "key": "ask", "language": "en"},
+    "transcript": [
+      {
+        "message_id": "m1",
+        "parent_id": null,
+        "author": "late_night_ops",
+        "body": "Ask HN: Our worker queue silently loses about 3% of jobs at peak. Redis lists with BRPOP, workers in Python, nothing in the logs. Where would you look first?",
+        "created_at": "2026-09-02T14:05:00+00:00",
+        "own": false
+      },
+      {
+        "message_id": "m2",
+        "parent_id": "m1",
+        "author": "cache_person",
+        "body": "Have you checked the maxmemory policy? If it is allkeys-lru the list itself can get evicted.",
+        "created_at": "2026-09-02T14:48:00+00:00",
+        "own": false
+      }
+    ],
+    "target_message_id": "m1",
+    "persona": {"label": "synthetic-maintainer", "profile_version": 1},
+    "relation": {
+      "state": "NEW_ENTRY",
+      "evidence": "no own messages in the thread",
+      "own_message_ids": []
+    },
+    "materials": [],
+    "allowed_reactions": ["DIAGNOSE", "HELP", "CLARIFY"],
+    "split": "DEV",
+    "synthetic": true,
+    "tags": ["new-entry", "diagnosis"]
+  },
+  "reference": {
+    "reaction": "DIAGNOSE",
+    "text": "BRPOP removes the job from the list before your worker has done anything with it. A worker that crashes or gets killed between the pop and the end of processing loses that job with nothing in any log, and peak is exactly when workers get OOM-killed. Two things to check before touching Redis config: count pops versus completions per worker for an hour (the gap is your 3%), and look at worker restarts in that window. If that is it, move the job to a per-worker processing list on pop (BLMOVE) and reap stale ones; that is the reliable queue pattern and it costs one extra command.",
+    "could_also": ["HELP"],
+    "rationale": "A new entry into somebody else's thread: it has to add something the thread does not have. The one existing reply covers eviction; the account's actual experience is the pop-then-crash loss and how to measure it. One concrete mechanism, one measurement, one fix.",
+    "author_of_reference": "MODEL",
+    "status": "CANDIDATE",
+    "later_messages": [
+      {
+        "message_id": "m3",
+        "parent_id": "m1",
+        "author": "late_night_ops",
+        "body": "It was the pop-then-crash thing. Workers were getting OOM-killed at peak. Thanks all.",
+        "created_at": "2026-09-03T09:12:00+00:00",
+        "own": false
+      }
+    ],
+    "outcome_note": "Synthetic demonstration; the later message exists only to test that the generator never sees it."
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "name": "wenext",
+  "description": "Wenext: the marketing agent for your product, as a plugin for Claude Code and Codex.",
+  "owner": {
+    "name": "Wenext"
+  },
+  "plugins": [
+    {
+      "name": "wenext",
+      "source": "./plugins/wenext",
+      "description": "Find conversations on Reddit and X where your product genuinely helps, reply in your voice, and publish from your own accounts only after you approve.",
+      "category": "productivity",
+      "tags": [
+        "marketing",
+        "reddit",
+        "x",
+        "community"
+      ]
+    },
+    {
+      "name": "wenext-cloud",
+      "source": "./plugins/wenext-cloud",
+      "description": "Hosted Wenext: finds people on Reddit describing the problem your code solves and drafts replies in your voice. Nothing to install, sign in once in the browser; you post each reply yourself.",
+      "category": "productivity",
+      "tags": [
+        "marketing",
+        "reddit",
+        "community",
+        "hosted"
+      ]
+    }
+  ]
+}

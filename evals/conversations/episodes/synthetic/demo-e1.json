@@ -1,0 +1,61 @@
+{
+  "input": {
+    "id": "demo-e1",
+    "source": {
+      "platform": "HACKER_NEWS",
+      "external_id": "synthetic-90000001",
+      "url": "https://news.ycombinator.com/item?id=90000001",
+      "thread_ref": null
+    },
+    "captured_at": "2026-09-01T12:40:00+00:00",
+    "community": {"display_name": "Hacker News, Ask HN", "key": "ask", "language": "en"},
+    "transcript": [
+      {
+        "message_id": "m1",
+        "parent_id": null,
+        "author": "op_dev",
+        "body": "Ask HN: Consumer keeps dropping messages under load, where do I even start? RabbitMQ, one consumer, prefetch unlimited, auto-ack. Under normal traffic everything is fine, at peak a few percent of messages never get processed.",
+        "created_at": "2026-09-01T09:10:00+00:00",
+        "own": false
+      },
+      {
+        "message_id": "m2",
+        "parent_id": "m1",
+        "author": "maintainer_dev",
+        "body": "Auto-ack is the first thing I would turn off. With auto-ack the broker considers a message delivered the moment it leaves the socket, so a consumer that dies with 2000 messages in its buffer loses all 2000. Manual ack plus a prefetch of a few hundred cost us maybe 5% throughput and the losses went to zero.",
+        "created_at": "2026-09-01T10:02:00+00:00",
+        "own": true
+      },
+      {
+        "message_id": "m3",
+        "parent_id": "m2",
+        "author": "op_dev",
+        "body": "thanks, that was it. prefetch 1000 with manual ack, already running an hour with zero drops.",
+        "created_at": "2026-09-01T12:31:00+00:00",
+        "own": false
+      }
+    ],
+    "target_message_id": "m3",
+    "persona": {"label": "synthetic-maintainer", "profile_version": 1},
+    "relation": {
+      "state": "OWN_CONTINUATION",
+      "evidence": "m3 replies to the account's own message m2",
+      "own_message_ids": ["m2"]
+    },
+    "materials": [],
+    "allowed_reactions": ["SHORT_ACK", "SILENCE"],
+    "split": "DEV",
+    "synthetic": true,
+    "tags": ["continuation", "thanks"]
+  },
+  "reference": {
+    "reaction": "SHORT_ACK",
+    "text": "glad it helped. keep an eye on the redelivery count for a day, it tends to creep back when traffic doubles.",
+    "could_also": ["SILENCE"],
+    "rationale": "The conversation is over. A one-line acknowledgement or nothing at all both fit; a new paragraph of advice or a follow-up question just to stay active would not.",
+    "author_of_reference": "MODEL",
+    "status": "CANDIDATE",
+    "later_messages": [],
+    "outcome_note": "Synthetic demonstration of the mechanics; not a real conversation and not the operator's judgment."
+  }
+}

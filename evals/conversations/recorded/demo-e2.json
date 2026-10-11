@@ -1,0 +1,10 @@
+{
+  "_recording": "synthetic answer written by an agent for the offline runner; not a model output and not the operator's judgment",
+  "decision": "DIAGNOSE",
+  "draft": "BRPOP takes the job out of the list before your worker has done anything with it. If the worker dies between the pop and the end of processing, the job is gone and nothing logs it, and peak is exactly when workers get OOM-killed. Before touching maxmemory: count pops versus completions per worker for an hour, the gap is your 3%, and check worker restarts in that window. If that is it, BLMOVE into a per-worker processing list and reap stale entries. One extra command.",
+  "target_message_id": "m1",
+  "contribution": "names the pop-then-crash loss mechanism, how to measure it, and the reliable-queue fix",
+  "brief_rationale": "New entry into a stranger's thread; the one existing reply covers eviction. The profile supports the pop-then-crash experience (Redis-based work queues, on call). One mechanism, one measurement, one fix.",
+  "sources_used": [],
+  "confidence": 0.75
+}

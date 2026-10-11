@@ -1,0 +1,41 @@
+{% macro metrics_panel(thread) %}
+<aside class="metrics" data-testid="thread-metrics">
+  <h3>Metryki wątku</h3>
+  <dl>
+    <dt>Odpowiedzi</dt><dd>{{ thread.metrics.reply_count }}</dd>
+    <dt>Unikalni rozmówcy</dt><dd>{{ thread.metrics.unique_participants }}</dd>
+    <dt>Poziomy zagnieżdżenia</dt><dd>{{ thread.metrics.depth_levels }}</dd>
+    <dt>Mediana długości odpowiedzi</dt><dd>{{ thread.metrics.median_reply_chars }} znaków</dd>
+    <dt>Przyrost w 1. godzinie</dt><dd>{{ thread.metrics.replies_first_hour }}</dd>
+    <dt>Przyrost później</dt><dd>{{ thread.metrics.replies_after_first_hour }}</dd>
+    <dt>Odpowiedzi autora</dt><dd>{{ thread.metrics.author_reply_count }}</dd>
+    <dt>Pierwsza odpowiedź autora</dt>
+    <dd>{% if thread.metrics.author_first_reply_minutes is none %}
+          <span class="unknown">autor się nie odezwał</span>
+        {% else %}po {{ thread.metrics.author_first_reply_minutes }} min{% endif %}</dd>
+    <dt>Udział rozmówców z ICP</dt>
+    <dd>{% if thread.metrics.icp_share is none %}
+          <span class="unknown" data-metric="icp_share" data-visible="false">niedostępne na tym surface</span>
+        {% else %}{{ (thread.metrics.icp_share * 100)|round(0)|int }}%{% endif %}</dd>
+    <dt>Zasięg</dt>
+    <dd>{% if thread.metrics.reach_impressions is none %}
+          <span class="unknown" data-metric="reach_impressions" data-visible="false">niedostępne na tym surface</span>
+        {% else %}{{ thread.metrics.reach_impressions }} wyświetleń{% endif %}</dd>
+    <dt>Podstawa kalibracji</dt><dd>{{ thread.metrics.reach_calibration_basis }}</dd>
+    <dt>Okno życia</dt><dd data-testid="window-state">{{ thread.window_state }}</dd>
+  </dl>
+  {% if thread.negative_signals %}
+    <p class="negative-signals" data-testid="negative-signals">
+      Sygnały negatywne: {{ thread.negative_signals|join(', ') }}
+    </p>
+  {% endif %}
+  {% if thread.amplifications %}
+    <h3>Podane dalej</h3>
+    <ul class="amplifications" data-testid="amplifications">
+      {% for a in thread.amplifications %}
+        <li><span class="kind">{{ a.kind }}</span> — {{ a.source }}: „{{ a.comment }}”</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+</aside>
+{% endmacro %}

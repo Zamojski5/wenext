@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ site_name }}{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <meta name="wenext-fixture-seed" content="{{ seed }}">
+</head>
+<body data-page="{% block page_id %}generic{% endblock %}">
+  <header class="topbar">
+    <a class="brand" href="/">{{ site_name }}</a>
+    <nav>
+      <a href="/c">Forum</a>
+      <a href="/g">Sieć zawodowa</a>
+      <a href="/api/public/">API publiczne</a>
+      <a href="/lab">Lab</a>
+    </nav>
+    <div class="account">
+      {% if session %}
+        <span data-testid="session-user">{{ session.username }}</span>
+        <a href="/logout">Wyloguj</a>
+      {% else %}
+        <a href="/login" data-testid="login-link">Zaloguj</a>
+      {% endif %}
+    </div>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <footer>
+    <p>Fixture testowy projektu wenext. Treść wygenerowana deterministycznie z seeda
+       <code>{{ seed }}</code>. Serwis nie odwzorowuje żadnej istniejącej platformy.</p>
+  </footer>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

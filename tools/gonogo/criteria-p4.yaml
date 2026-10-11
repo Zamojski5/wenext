@@ -1,0 +1,83 @@
+# Progi walidacji jednego projektu na Reddicie (P4 i P5, ROADMAP-PIVOT).
+#
+# ZASADA, KTÓREJ NIE WOLNO ZŁAMAĆ (ta sama, co w criteria.yaml i criteria-p7.yaml):
+# progi są zapisane PRZED pierwszym pomiarem. Zmiana progu po zobaczeniu wyniku musi być widoczna
+# w historii tego pliku i unieważnia bieżący wynik. Próg dobrany do wyniku nie jest progiem,
+# tylko opisem tego, co wyszło.
+#
+# NA JAKIE PYTANIE ODPOWIADA TEN PLIK. Nie „czy agent działa", tylko „czy warto, żeby działał
+# dalej w tym jednym projekcie". Pięć liczb rozstrzyga i żadna nie zastępuje pozostałych:
+# czy cisza jest tania, czy publikacja jest tania, czy wiemy, że jest widoczna, jak często
+# trzeba było wejść ręką, i czy korekty człowieka w ogóle docierają do agenta.
+#
+# DLACZEGO DOBA, A NIE TYDZIEŃ. Projekt na Reddicie ma cykl dobowy: wątki żyją godzinami, a nie
+# dniami. Tydzień ukryłby dzień, w którym nic nie działało, w średniej z sześciu dobrych.
+
+wersja: 1
+zamrozone_dnia: "2026-09-19"
+okno_dob: 1
+
+# Okno KRÓTSZE niż doba nie dostaje werdyktu. Trzy godziny bez publikacji wyglądają jak spokój,
+# a doba bez publikacji wygląda inaczej, i to ta druga liczba jest prawdą o projekcie.
+krotsze_okno: NIE_URUCHOMIONO
+
+progi:
+  obudzenia_bez_modelu:
+    pytanie: >-
+      Jaki odsetek obudzeń BEZ nowych zdarzeń zakończył się bez wywołania modelu?
+    zrodlo_dowodu: "wakeups.skipped_reason IS NOT NULL oraz wakeups.cost"
+    prog: 0.95
+    jednostka: "ułamek pustych cykli bez kosztu modelu"
+    uzasadnienie: >-
+      To jest cała różnica między agentem, który czeka, a agentem, który pali budżet na ciszę.
+      Pusty cykl ma kosztować odczyt kolektora i nic więcej. 0.95, a nie 1.0, bo pojedyncze
+      obudzenie może mieć zdarzenie, które dopiero model uzna za nieistotne, i to jest wydatek
+      uzasadniony.
+
+  koszt_na_potwierdzona_publikacje:
+    pytanie: "Ile tur modelu kosztowała jedna publikacja o POTWIERDZONEJ widoczności?"
+    zrodlo_dowodu: "cost_ledger oraz publication_requests.public_visibility = 'CONFIRMED'"
+    prog: 12
+    jednostka: "tur modelu na potwierdzoną publikację"
+    uzasadnienie: >-
+      Ta sama liczba, co w criteria-p7.yaml, i celowo ta sama: gdyby walidacja projektu miała
+      luźniejszy próg niż tydzień usługi, „projekt się opłaca" i „usługa się opłaca" znaczyłyby
+      co innego. Mianownikiem są publikacje POTWIERDZONE, nie wysłane: tekst usunięty po godzinie
+      kosztował tyle samo modelu i nie dał nic.
+
+  potwierdzone_widocznosci:
+    pytanie: "Jaki odsetek publikacji ma POTWIERDZONĄ widoczność, a nie tylko wysyłkę?"
+    zrodlo_dowodu: "publication_requests.public_visibility"
+    prog: 0.8
+    jednostka: "ułamek publikacji okna"
+    uzasadnienie: >-
+      Odwrotna strona progu „niepewne skutki" z P7, postawiona wprost, bo w walidacji projektu to
+      jest pytanie główne: czy to, co agent napisał, w ogóle widać. Cztery piąte zostawiają
+      miejsce na wpisy, których nie dało się odczytać anonimowo w oknie doby.
+
+  interwencje_czlowieka:
+    pytanie: "Ile razy człowiek musiał wejść ręką, żeby projekt szedł dalej?"
+    zrodlo_dowodu: "incidents.detected_by = 'HUMAN' oraz korekty po powrocie"
+    prog: 3
+    jednostka: "zdarzeń na dobę"
+    uzasadnienie: >-
+      Trzy, a nie dwa jak w tygodniu usługi, bo korekta kierunku po powrocie JEST przewidzianą
+      formą pracy z agentem, a nie awarią. Powyżej trzech dziennie człowiek nie koryguje
+      kierunku, tylko pisze za agenta.
+
+  korekty_docieraja:
+    pytanie: >-
+      Jaki odsetek korekt człowieka trafił przed oczy agenta, czyli po ilu z nich ruszyła sesja
+      pytająca o pamięć?
+    zrodlo_dowodu: "knowledge_items.kind = 'PREFERENCE' oraz session_events z TOOL_CALL memory.*"
+    prog: 0.9
+    jednostka: "ułamek korekt okna"
+    uzasadnienie: >-
+      MIERZY DOTARCIE, NIE POSŁUSZEŃSTWO. Że agent zastosował korektę, z bazy nie widać i ten
+      próg tego nie udaje. Widać, czy miał ją przed sobą, a korekta, której nie miał, jest
+      zepsutym mechanizmem, nie zepsutym modelem. 0.9, bo korekta zapisana minutę przed końcem
+      okna może nie mieć jeszcze swojej sesji.
+
+# Werdykt całości. Wszystkie pięć progów, bo każdy mierzy co innego: projekt z tanią ciszą,
+# który nie publikuje nic widocznego, nie jest projektem, który warto prowadzić dalej.
+werdykt: "GO wymaga spełnienia WSZYSTKICH pięciu progów; brak pomiaru to NIE_URUCHOMIONO"

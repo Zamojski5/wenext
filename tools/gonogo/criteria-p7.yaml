@@ -1,0 +1,73 @@
+# Progi oceny tygodnia gotowości operacyjnej (P7 etap B, ROADMAP-PIVOT).
+#
+# ZASADA, KTÓREJ NIE WOLNO ZŁAMAĆ (ta sama, co w criteria.yaml):
+# Progi są zapisane PRZED uruchomieniem pomiaru. Zmiana progu po zobaczeniu wyników musi być
+# widoczna w historii tego pliku i unieważnia bieżący wynik. Plik powstał zanim jakikolwiek
+# tydzień został zmierzony, i to jest jego jedyna wartość: próg dobrany do wyniku nie jest progiem,
+# tylko opisem tego, co wyszło.
+#
+# DLACZEGO WŁAŚNIE TE CZTERY LICZBY. Roadmapa P7 pyta, czy usługa działa niezależnie od laptopa
+# autora. Cztery rzeczy rozstrzygają o odpowiedzi i żadnej z nich nie da się zastąpić pozostałymi:
+# czy chodziła, ile razy trzeba było ją popchnąć ręką, ile kosztowała jedna POTWIERDZONA
+# publikacja, i jak często nie wiemy, co się stało.
+
+wersja: 1
+zamrozone_dnia: "2026-09-19"
+okno_dob: 7
+
+# Okno KRÓTSZE niż siedem dób nie jest tygodniem i nie dostaje werdyktu. To nie jest formalizm:
+# pięć dób bez awarii wygląda jak dostępność 100%, a tydzień z jedną awarią w szóstej dobie
+# wygląda inaczej, i to ta druga liczba jest prawdą o usłudze.
+krotsze_okno: NIE_URUCHOMIONO
+
+progi:
+  dostepnosc:
+    pytanie: >-
+      Jaki odsetek interwałów miał puls każdego komponentu, który w tym tygodniu w ogóle
+      pracował?
+    zrodlo_dowodu: "service_heartbeats, incidents"
+    prog: 0.95
+    jednostka: "ułamek interwałów z pulsem"
+    uzasadnienie: >-
+      0.95 przy interwale pięciominutowym to około ośmiu godzin ciszy na tydzień. Wyżej nie
+      stawiamy, bo usługa stoi na jednej maszynie bez zapasu i próg, którego nie da się spełnić
+      inaczej niż przez szczęście, przestaje cokolwiek znaczyć. Komponent, który NIE pracował
+      ani razu, nie wchodzi do mianownika: to nie jest awaria, tylko rzecz, której to wdrożenie
+      nie uruchamia.
+
+  interwencje_czlowieka:
+    pytanie: "Ile razy człowiek musiał ręcznie popchnąć usługę, żeby szła dalej?"
+    zrodlo_dowodu: "incidents.detected_by = 'HUMAN' oraz wpisy audytu o wznowieniu"
+    prog: 2
+    jednostka: "zdarzeń na tydzień"
+    uzasadnienie: >-
+      Dwa to granica między „usługa działa, czasem trzeba zajrzeć" a „usługa jest podtrzymywana
+      ręcznie". Zero byłoby progiem nieuczciwym na tym etapie: pilot nadal bywa dotykany.
+
+  koszt_na_potwierdzona_publikacje:
+    pytanie: >-
+      Ile tur modelu kosztowała jedna publikacja, o której WIEMY, że jest publicznie widoczna?
+    zrodlo_dowodu: "cost_ledger, publication_requests.public_visibility = 'CONFIRMED'"
+    prog: 12
+    jednostka: "tur modelu na potwierdzoną publikację"
+    uzasadnienie: >-
+      Mianownikiem są publikacje POTWIERDZONE, nie wysłane. To celowo surowsza miara: tekst,
+      który poszedł i został usunięty, kosztował tyle samo modelu, a nie dał nic. Dwanaście jest
+      progiem wziętym z tego, ile tur zajmuje dziś przygotowanie jednej odpowiedzi z odczytem
+      wątku i zapisem ustalenia; jeśli okaże się za luźny, obniżenie go będzie widoczne w historii
+      tego pliku.
+
+  niepewne_skutki:
+    pytanie: "Jaki odsetek publikacji został bez potwierdzonej widoczności?"
+    zrodlo_dowodu: "publication_requests.public_visibility = 'UNVERIFIED'"
+    prog: 0.2
+    jednostka: "ułamek publikacji tygodnia"
+    uzasadnienie: >-
+      To jest miara P0 przeniesiona na poziom tygodnia. UNVERIFIED nie znaczy „poszło źle", tylko
+      „nie wiemy" i właśnie dlatego ma próg: niewiedza, której jest więcej niż jedna piąta,
+      przestaje być wyjątkiem i staje się stanem, w którym raport o publikacjach nic nie mówi.
+
+# Werdykt całości. Wszystkie cztery progi muszą być spełnione, bo każdy mierzy co innego i
+# średnia z nich nie znaczyłaby nic: usługa dostępna w 99%, która wymaga pięciu interwencji
+# tygodniowo, nie działa niezależnie od laptopa autora.
+werdykt: "GO wymaga spełnienia WSZYSTKICH czterech progów; brak pomiaru to NIE_URUCHOMIONO"

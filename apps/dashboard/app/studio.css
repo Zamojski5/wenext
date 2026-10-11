@@ -1,0 +1,1921 @@
+/*
+ * Studio — the visual language of WIZJA-WORKSPACE, section „Język wizualny" (D-040).
+ *
+ * The reference is `docs/produkt/prototyp/workspace-studio.html`: almost-black `#080808`, the two
+ * surfaces `#0b0b0b` and `#131313`, white and neutral greys, and ONE accent `#d3e4af` that marks
+ * STATE and nothing else. The accent never fills a card and never appears on a hover; a colour
+ * that means "active" and also means "you are pointing at it" means neither.
+ *
+ * THREE RULES CARRIED OVER FROM `globals.css`, BECAUSE THEY ARE ABOUT HONESTY, NOT TASTE:
+ *
+ *   1. There is no colour vocabulary for "good". No green, no tick, no success accent. An empty
+ *      screen is a normal state here (a new workspace has nothing in it), and a stylesheet that
+ *      painted it reassuringly would be `all([]) == True` in the visual layer (D-011).
+ *   2. `--st-warn` marks a STATED ABSENCE — "skutek niepotwierdzony", "integracja niedostępna",
+ *      "brak danych" — not a failure. Failure is `--st-danger` and it is rare.
+ *   3. Nothing animates on its own. The mark waves only while the model is really working, which
+ *      is a state this milestone never sets, so nothing in P1 waves at all. An interface that
+ *      pretends to think while no model is running lies to somebody who pays per token.
+ *
+ * MOTION IS ONE RHYTHM, USED EVERYWHERE: a short slide up, a soft fade, and the reverse on close
+ * (WIZJA-WORKSPACE, „Doprecyzowanie ruchu z 2026-09-19"). Panels open AT the element that opened
+ * them, never in the middle of the screen. Every transition and animation is switched off under
+ * `prefers-reduced-motion: reduce`, at the bottom of this file, in one block.
+ *
+ * `body` is repainted only when a studio root is present, so the operator panel keeps its own
+ * light surfaces on the same document.
+ */
+
+@font-face {
+  font-family: "Manrope Studio";
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("/fonts/manrope-800-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Manrope Studio";
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("/fonts/manrope-800-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+:root:has(.st) {
+  color-scheme: dark;
+}
+
+body:has(.st) {
+  background: #080808;
+}
+
+.st {
+  --st-ground: #080808;
+  --st-side: #0b0b0b;
+  --st-surface: #131313;
+  --st-raised: #1b1b1b;
+  --st-hover: #171717;
+  --st-line: rgba(255, 255, 255, 0.05);
+  --st-line-strong: rgba(255, 255, 255, 0.09);
+
+  --st-ink: #f3f3f1;
+  --st-ink-2: #a6a6a2;
+  /* MEASURED, not chosen by eye: #777772 came out at 3.87:1 on the raised surface and 4.45:1 on
+     the base, both under the 4.5:1 that WCAG asks of body text, and both used for sentences a
+     person has to read (an empty state, a project's second line). The render review computes the
+     ratio from the pixels the browser painted; `tests/studio_style.test.ts` keeps the token from
+     drifting back down. */
+  --st-ink-3: #8f8f89;
+
+  --st-accent: #d3e4af;
+  --st-warn: #d8c08a;
+  --st-danger: #e08b82;
+
+  --st-radius: 12px;
+  --st-radius-lg: 18px;
+  --st-speed: 260ms;
+  --st-ease: cubic-bezier(0.2, 0.75, 0.15, 1);
+
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  background: var(--st-ground);
+  color: var(--st-ink);
+  font-family: "Helvetica Neue", Helvetica, -apple-system, BlinkMacSystemFont, Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.st *,
+.st *::before,
+.st *::after {
+  box-sizing: border-box;
+}
+
+.st h1,
+.st h2,
+.st h3 {
+  margin: 0;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+}
+
+.st p {
+  margin: 0;
+}
+
+/* `color: inherit` and no underline is right for a LIST ROW that is a link (a project in the
+   sidebar, a material): the whole row is the target and an underline would turn a calm list into
+   a page of blue. It is wrong for a link INSIDE a sentence, which then looks exactly like the
+   words around it — found in the render review of 19.09 on "Wróć do projektu" in the Materiały
+   lede. So prose links get the accent and an underline, and rows keep what they had. */
+.st a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.st__lede a,
+.st-note a,
+/* Pusty stan bywa jedynym miejscem, z którego prowadzi droga dalej („historia przestrzeni
+   jest tam"). Bez tej reguły odsyłacz dziedziczy `color: inherit` i `text-decoration: none`
+   z `.st a`, czyli wygląda jak zwykły tekst i nikt go nie klika. */
+.st-empty a,
+.st p:not([class]) a {
+  color: var(--st-accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+
+.st ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.st :focus-visible {
+  outline: 2px solid var(--st-accent);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* ------------------------------------------------------------------ pasek boczny */
+
+/*
+ * PRZYKLEJONA, BO ROZMOWA JEST DŁUGA (uwaga założyciela z 20.09, 01:15: „lewa też w stylu tego
+ * dashboardu", kolumna po przewinięciu była pusta). Kolumna zostaje na ekranie, przewija się
+ * sama, gdy jest w niej więcej projektów niż miejsca, a logo i wylogowanie siedzą na JEJ dole,
+ * nie na dole strony: `margin-top: auto` w kolumnie o wysokości ekranu.
+ */
+.st__side {
+  display: flex;
+  flex-direction: column;
+  /* BEZ `gap`, I TO JEST CIĄG DALSZY RÓŻNICY NR 1. Odstępy w pasku referencji robią marginesy
+     bloków (`wm-sidebar-top` ma `margin-bottom: 51px`, nawigacja swój `margin-top`), a `gap`
+     dokładał do każdego z nich jeszcze 22 px. Skutek był mierzalny: etykieta „Projekty" stała
+     22 px niżej niż w makiecie, a wszystko pod nią razem z nią. Reguła, która DODAJE do układu
+     referencji, jest tą samą chorobą, co reguła, która go nadpisuje. */
+  padding: 24px 14px 20px 20px;
+  background: var(--st-side);
+  border-right: 1px solid var(--st-line);
+  min-width: 0;
+  position: sticky;
+  top: 0;
+  /* `align-self: start` JEST TU KONIECZNE, nie kosmetyczne. W siatce element domyślnie rozciąga
+     się na całą wysokość wiersza, a rozciągnięty nie ma po czym się przykleić: `position:
+     sticky` bez tego nic nie robi i funkcja wyglądałaby na wdrożoną, nie będąc. */
+  align-self: start;
+  /* WYSOKOŚĆ RAMY, NIE OKNA (odbiór 3, N5): rama ma obramowanie 1 px z każdej strony, więc
+     kolumna na 100vh razem z nim dawała dokument 786 px w oknie 784 px i cała strona przewijała
+     się o dwa piksele. Sto procent liczy się od `.wm-scene`, która ma już wysokość ramy. */
+  height: 100%;
+  /* PASEK NIE PRZEWIJA SIĘ JAKO CAŁOŚĆ (odbiór 2, R1), ale też NICZEGO NIE OBCINA (odbiór 3, R4).
+     `overflow: hidden` rozwiązywało pierwsze i tworzyło drugie: trzy panele zapadek paska
+     (przełącznik przestrzeni, „Nowy projekt", awatar) były ucinane przy krawędzi kolumny, a
+     ucięta część nie istnieje dla kliknięcia. Pasek ma więc wysokość okna i nic nie przycina;
+     przycina wyłącznie region listy projektów, a jedyna zapadka, która w nim stała, wyszła
+     poza niego. */
+}
+
+/*
+ * Region, który się przewija: lista projektów z rozmowami. Reszta paska ma stać.
+ *
+ * `min-height: 0` jest tu KONIECZNE, nie kosmetyczne: dziecko kolumny flex ma domyślnie
+ * `min-height: auto`, więc nie da się go skurczyć poniżej zawartości i `overflow` nigdy nie
+ * zadziała, a pasek rośnie dalej, tylko ciszej.
+ */
+.st__scroll {
+  /*
+   * BUDŻET, NIE DOLNA GRANICA (odbiór 3, R6). `min-height: 160px` przy 380 px treści pokazywało
+   * jeden projekt z sześciu i siedem pikseli wejścia „Nowa rozmowa", a reszta paska i tak nie
+   * wypełniała okna: części stałe zajmowały 637 px z 784. Region ma dostać CAŁE miejsce, które
+   * zostaje po częściach stałych, i nic poza tym: `flex: 1` bez dolnej granicy robi dokładnie to,
+   * o ile rodzic ma wysokość (ma: okno) i o ile pozwolimy mu się skurczyć (`min-height: 0`).
+   */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  /*
+   * PASEK PRZEWIJANIA MA BYĆ WIDOCZNY, gdy jest co przewijać. macOS domyślnie chowa go do czasu
+   * ruchu, więc lista ucięta w połowie wiersza wygląda jak lista, która się skończyła. Tu nie
+   * chodzi o ozdobę: to jedyny znak, że pod spodem jest więcej projektów.
+   *
+   * `scrollbar-width` i `scrollbar-color` były tu wcześniej i to był błąd: od Chrome 121 sama
+   * ich obecność WYŁĄCZA reguły `::-webkit-scrollbar`, a nakładkowy pasek nie zajmuje ani
+   * piksela szerokości (zmierzone: `offsetWidth - clientWidth` = 0) i na zrzucie go nie ma.
+   * Zostaje więc wyłącznie pseudoelement, który rysuje pasek stale i rezerwuje na niego
+   * miejsce. Sprawdza to pomiar, nie oko: szerokość ma być większa od zera.
+   */
+}
+
+.st__scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.st__scroll::-webkit-scrollbar-thumb {
+  background: #3a3a38;
+  border-radius: 4px;
+}
+
+
+.st__top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+/*
+ * NAZWA PRZESTRZENI PISANA JAK WORDMARK ZNIKŁA 21.09 (odbiór 1, różnica nr 1).
+ *
+ * Była tu reguła `.st__top [data-pop="workspace-switch"] > summary` z Manrope 800 w 28 px, przez
+ * którą „ws-e2e" stało w górze paska jak logotyp, wiersz miał 48 px zamiast 37 i cała lista
+ * projektów zjeżdżała o 33 px w dół. Referencja ma tam zwykły przełącznik: nazwa 14 px, waga
+ * 400, chevron przy prawej krawędzi.
+ *
+ * NIE WYSTARCZYŁO DOPISAĆ `wm-workspace-switch` DO ZNACZNIKA, i to jest lekcja z tej różnicy:
+ * tamta reguła miała swoistość 0,3,1, a reguła referencji `.st .wm-workspace-switch` ma 0,2,0,
+ * więc wygrywała także po łatce. Druga nazwa klasy nie pomoże, dopóki obok stoi mocniejszy
+ * selektor mówiący co innego. `min-height: 48px` z `.st__top` odchodzi z tego samego powodu:
+ * wysokość wiersza ma dziś wynikać z zawartości, tak jak w referencji.
+ */
+
+/*
+ * The mark: the founder's symbol, no wordmark, no frame, no box (D-039, decision of 18.09).
+ * "Wenext" is a working name and does not belong next to it. It does not animate in P1: both
+ * motions WIZJA-WORKSPACE describes happen while a model is answering, and no model answers here.
+ */
+.st__mark {
+  display: block;
+  /* 26px, nie 58px: od D-045 znak stoi w GÓRNYM pasku obok nazwy przestrzeni, jak w prototypie,
+     a nie sam w stopce. W tamtym miejscu był jedynym elementem i mógł być duży; tutaj większy od
+     napisu obok przestałby być znakiem, a stałby się ilustracją. */
+  width: 26px;
+  height: auto;
+  flex-shrink: 0;
+}
+
+.st__group {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 8px;
+  color: var(--st-ink-3);
+  font-size: 11px;
+}
+
+.st__list {
+  display: grid;
+  gap: 3px;
+}
+
+/* Pigułka, nie prostokąt: promień i odstępy z prototypu przyjętego 20.09 (`wm-navigation
+   button`: 12px tekstu, 8px na 15px odstępu, zaokrąglenie do pełnego łuku). Wartości są
+   przepisane na nasze tokeny, a nie skopiowane razem z jasną paletą prototypu. */
+.st__item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--st-ink-2);
+  min-width: 0;
+  transition:
+    background-color var(--st-speed) var(--st-ease),
+    color var(--st-speed) var(--st-ease);
+}
+
+.st__item:hover {
+  background: var(--st-hover);
+  color: var(--st-ink);
+}
+
+.st__item[aria-current="page"] {
+  background: var(--st-raised);
+  color: var(--st-ink);
+}
+
+.st__item span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Stan projektu jako kropka: szara = wstrzymany, akcent = pracuje. Jedyne miejsce z akcentem
+   w liście, i oznacza stan, nie wyróżnienie. */
+.st__dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #4c4c48;
+  flex-shrink: 0;
+}
+
+.st__dot[data-state="active"] {
+  background: var(--st-accent);
+}
+
+/* ---------------------------------------------------- rozmowy w pasku (D-045) */
+
+/*
+ * Lista rozmów pod otwartym projektem i sekcja „Ostatnie". Wcięcie, nie ramka: rozmowy należą do
+ * projektu nad nimi i linia pionowa mówi to ciszej niż obwódka. Rozmiar mniejszy od pozycji
+ * projektu, bo to jest drugi poziom, a nie druga nawigacja.
+ */
+.st__convs {
+  display: grid;
+  gap: 1px;
+  margin: 2px 0 6px 18px;
+  padding-left: 8px;
+  border-left: 1px solid var(--st-line);
+}
+
+.st-conv {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  color: var(--st-ink-3);
+  font-size: 11px;
+  line-height: 1.5;
+  min-width: 0;
+  transition:
+    background-color var(--st-speed) var(--st-ease),
+    color var(--st-speed) var(--st-ease);
+}
+
+.st-conv:hover {
+  background: var(--st-hover);
+  color: var(--st-ink);
+}
+
+.st-conv[aria-current="page"] {
+  background: var(--st-raised);
+  color: var(--st-ink);
+}
+
+.st-conv__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Data odsuwa się na prawo i znika pierwsza, gdy tytuł jest długi: tytuł niesie znaczenie, data
+   tylko porządek, a obcięty tytuł zamienia listę rozmów w listę początków zdań. */
+.st-conv__when {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--st-ink-3);
+  font-size: 10px;
+  opacity: 0.75;
+}
+
+.st-conv--new,
+.st-conv--all {
+  color: var(--st-ink-2);
+}
+
+/* Podnawigacja projektu („W projekcie"). Osobna od `.st__nav`, bo tamta jest nawigacją CAŁEJ
+   przestrzeni i ma nad sobą kreskę oddzielającą oba poziomy. */
+.st__subnav {
+  display: grid;
+  gap: 3px;
+}
+
+.st__nav {
+  display: grid;
+  gap: 3px;
+  padding-top: 16px;
+  border-top: 1px solid var(--st-line);
+}
+
+.st__foot {
+  margin-top: auto;
+  display: grid;
+  gap: 8px;
+  padding: 16px 0 0;
+  color: var(--st-ink-3);
+  font-size: 11px;
+}
+
+/* Wylogowanie czyta się jak pozycja kolumny, a nie jak przycisk z innego ekranu: ten sam
+   rozmiar i ten sam atrament, co `.st__item`. Tło pojawia się dopiero pod kursorem. */
+.st__foot .st-btn {
+  justify-self: start;
+  padding: 8px 10px;
+  border-radius: 9px;
+  font-size: 12px;
+  color: var(--st-ink-2);
+}
+
+.st__foot .st-btn:hover {
+  background: var(--st-hover);
+  color: var(--st-ink);
+}
+
+/* ------------------------------------------------------------------ obszar główny */
+
+/*
+ * SCENA MA STAŁĄ WYSOKOŚĆ OKNA, jak makieta (odbiór 2, R2 i N3).
+ *
+ * Kolumna główna rosła z treścią, więc przy trzech dwuliniowych rozmowach pole rozmowy
+ * wychodziło poza 784 px i trzeba było przewijać CAŁĄ stronę, żeby do niego dojść. W makiecie
+ * pole jest zawsze widoczne, a przewija się to, co nad nim. Stąd wysokość okna tutaj i
+ * `overflow` na treści niżej.
+ */
+.st__main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  /* Jak w pasku (N5): wysokość ramy, nie okna. */
+  height: 100%;
+  /*
+   * KOLUMNA MA DNO, ALE NIE POŁYKA TREŚCI (znalezione w rundzie 5 pomiarem, nie w odbiorze).
+   *
+   * `overflow: hidden` weszło tu razem ze stałą wysokością sceny (odbiór 2, R2/N3), żeby pole
+   * rozmowy zostało na dole zamiast uciekać pod ekran. Na ekranach rozmowy było dobrze, bo tam
+   * przewija się wątek w środku. Na ekranach listy nie przewijało się NIC: Aktywność miała
+   * 1676 px treści w oknie 784 px, Wiedza 1511 px, Ludzie 1370 px, a `document.scrollingElement`
+   * nie miał czego przewijać. To znaczy, że od 892 do 586 pikseli treści było nie do obejrzenia
+   * żadnym ruchem myszy ani klawiatury. Ekran, który chowa własną treść bez śladu, kłamie
+   * gorzej niż martwy przycisk.
+   *
+   * `auto` zostawia dno (nic nie rośnie poza ramę, pole rozmowy stoi tam, gdzie stało: kolumna
+   * na ekranach rozmowy ma 782 px treści przy 782 px wysokości, więc pasek się nie pojawia)
+   * i oddaje ekranom listy przewijanie. Klipowanie zapadek, o które poszło R4, tu nie wraca:
+   * `.st__main` sięga niemal krawędzi okna, a panele mają 320 px i mieszczą się w nim.
+   */
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 22px 30px 26px;
+}
+
+/* Ten sam pasek przewijania, co w liście projektów i w wątku. */
+.st__main::-webkit-scrollbar {
+  width: 8px;
+}
+
+.st__main::-webkit-scrollbar-thumb {
+  background: #3a3a38;
+  border-radius: 4px;
+}
+
+.st__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 34px;
+}
+
+/* Okruszki są Z MAKIETY RAMY (`workspace-studio`, `.wm-breadcrumb`): 11 px i #797977, czyli
+   ciszej niż dotąd. Miały 12 px i #90908e z makiety ROZMOWY (`.st-crumb`), bo stąd przepisano je
+   najpierw; dwie makiety, dwie wartości, a nagłówek należy do ramy (odbiór 1, różnica nr 15).
+   Wartości wpisane wprost, a nie przez tokeny rozmowy, bo nagłówek stoi POZA korzeniem widoku
+   rozmowy i tamte tokeny go nie sięgają. */
+.st__crumb {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 11px;
+  color: #797977;
+  margin-right: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.st__crumb > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Miejsce, w którym stoisz. Nie pogrubione, tylko jaśniejsze: pogrubienie w pasku okruszków
+   krzyczy, a tu chodzi o jedną różnicę w tonie. */
+.st__crumb b {
+  font-weight: 400;
+  color: #d9d9d6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.st__content {
+  flex: 1;
+  /* `min-height: 0`, bo bez tego dziecko kolumny flex nie da się skurczyć poniżej zawartości i
+     `overflow` w środku nigdy nie zadziała (ta sama pułapka, co w pasku). */
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding-top: 40px;
+  display: flex;
+  flex-direction: column;
+  animation: st-enter var(--st-speed) var(--st-ease);
+}
+
+/* 29 px i -1,15 px odstępu liter, czyli tytuł ekranu Z REFERENCJI RAMY (odbiór 1, nr 22).
+   Miał 28 px z `-0.02em`, bo tyle ma nagłówek makiety ROZMOWY; ekrany list należą do ramy.
+
+   SELEKTOR Z DWIEMA KLASAMI, bo `.st h1` (0,1,1) bije samotne `.st__title` (0,1,0) i zmierzony
+   odstęp liter wychodził -0,58 px zamiast -1,15 (odbiór 2, kaskada E-F). Trzeci raz ta sama
+   pułapka w tym arkuszu. */
+.st .st__title {
+  font-size: 29px;
+  letter-spacing: -0.04em;
+  line-height: 1.3;
+  color: var(--st-ink);
+}
+
+.st__lede {
+  margin-top: 10px;
+  color: var(--st-ink-2);
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.st__meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.st__section {
+  margin-top: 34px;
+  display: grid;
+  gap: 12px;
+}
+
+.st__section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--st-ink-3);
+  font-size: 11px;
+}
+
+/* ------------------------------------------------------------------ powierzchnie i wiersze */
+
+.st-surface {
+  background: var(--st-surface);
+  border-radius: var(--st-radius-lg);
+  padding: 4px 20px;
+}
+
+.st-row {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  width: 100%;
+  padding: 17px 0;
+  text-align: left;
+  min-width: 0;
+}
+
+.st-row + .st-row {
+  border-top: 1px solid var(--st-line);
+}
+
+/* Wiersz, który JEST odsyłaczem (lista rozmów projektu, D-045). Cały wiersz jest celem, więc
+   bez podkreślenia i w kolorze treści: podkreślone wiersze zamieniłyby spokojną listę w stronę
+   pełną niebieskiego. Tło pod kursorem mówi, że da się kliknąć, i wystarcza. */
+a.st-row {
+  color: inherit;
+  text-decoration: none;
+  padding-left: 10px;
+  padding-right: 10px;
+  margin-left: -10px;
+  margin-right: -10px;
+  border-radius: var(--st-radius);
+  transition: background-color var(--st-speed) var(--st-ease);
+}
+
+a.st-row:hover {
+  background: var(--st-hover);
+}
+
+.st-row__body {
+  min-width: 0;
+  flex: 1;
+}
+
+.st-row strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--st-ink);
+  overflow-wrap: anywhere;
+}
+
+.st-row small {
+  display: block;
+  font-size: 11px;
+  color: var(--st-ink-3);
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+}
+
+.st-badge {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: var(--st-raised);
+  color: var(--st-ink);
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.st-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: var(--st-raised);
+  color: var(--st-ink-2);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.st-tag[data-tone="state"] {
+  color: var(--st-ink);
+}
+
+.st-tag[data-tone="state"]::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--st-accent);
+}
+
+.st-tag[data-tone="absent"] {
+  color: var(--st-warn);
+}
+
+.st-tag[data-tone="danger"] {
+  color: var(--st-danger);
+}
+
+.st-note {
+  font-size: 11px;
+  color: var(--st-ink-3);
+  line-height: 1.7;
+}
+
+.st-note[data-tone="absent"] {
+  color: var(--st-warn);
+}
+
+.st-note[data-tone="danger"] {
+  color: var(--st-danger);
+}
+
+/* „Brak danych" ma wyglądać jak zdanie, nie jak awaria i nie jak pustka. */
+.st-empty {
+  padding: 18px 0;
+  color: var(--st-ink-3);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+/* ------------------------------------------------------------------ przyciski */
+
+.st-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--st-raised);
+  color: var(--st-ink);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color var(--st-speed) var(--st-ease);
+}
+
+.st-btn:hover {
+  background: #272725;
+}
+
+.st-btn[data-kind="primary"] {
+  background: #eaeae2;
+  color: #101010;
+}
+
+.st-btn[data-kind="primary"]:hover {
+  background: #fff;
+}
+
+.st-btn[data-kind="quiet"] {
+  background: transparent;
+  color: var(--st-ink-3);
+  padding: 6px 0;
+}
+
+.st-btn[data-kind="quiet"]:hover {
+  color: var(--st-ink);
+  background: transparent;
+}
+
+.st-circle {
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 50%;
+  background: #151515;
+  color: var(--st-ink-2);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    background-color var(--st-speed) var(--st-ease),
+    color var(--st-speed) var(--st-ease);
+}
+
+.st-circle:hover {
+  background: #232321;
+  color: var(--st-ink);
+}
+
+/* ------------------------------------------------------------------ panele przy elemencie */
+
+/*
+ * A panel opens AT the control that opened it: `.st-pop` is the positioning context and the panel
+ * is absolutely placed against it. `<details>` rather than a client component, because this
+ * package has no browser code at all (D-016, `tests/source_scan.test.ts`) — so the open state is
+ * the element's own, it works with JavaScript switched off, and the keyboard gets `<summary>`
+ * semantics for free.
+ *
+ * `data-side="right"` flips the panel to the left edge of its trigger, for the ones that sit near
+ * the right-hand side of the screen (WIZJA: „przy krawędzi wybiera stronę z dostępnym miejscem").
+ */
+.st-pop {
+  position: relative;
+  display: inline-block;
+}
+
+.st-pop > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.st-pop > summary::-webkit-details-marker {
+  display: none;
+}
+
+.st-pop__panel {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 8px);
+  left: 0;
+  width: min(320px, calc(100vw - 32px));
+  padding: 18px;
+  border-radius: var(--st-radius);
+  background: #1a1a19;
+  box-shadow:
+    0 18px 60px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(255, 255, 255, 0.06);
+  animation: st-enter var(--st-speed) var(--st-ease);
+}
+
+.st-pop[data-side="right"] .st-pop__panel {
+  left: auto;
+  right: 0;
+}
+
+.st-pop__title {
+  font-size: 13px;
+  color: var(--st-ink);
+  margin-bottom: 4px;
+}
+
+@keyframes st-enter {
+  from {
+    opacity: 0;
+    transform: translateY(7px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ------------------------------------------------------------------ formularze */
+
+.st-form {
+  display: grid;
+  gap: 10px;
+}
+
+/*
+ * Formularz W POLU ROZMOWY nie dokłada własnego odstępu (odbiór 2, nr 2): pasek pod tekstem ma
+ * swój `margin-top` z referencji, a `gap: 10px` doliczał się do niego i pole miało 135 px
+ * zamiast 125. Odstępy w polu opisuje makieta, nie siatka formularzy Studia.
+ */
+.st-composer .st-form {
+  gap: 0;
+}
+
+.st-field {
+  display: grid;
+  gap: 5px;
+}
+
+.st-field > span {
+  font-size: 11px;
+  color: var(--st-ink-3);
+}
+
+.st-input,
+.st-select,
+.st-textarea {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  border-radius: 9px;
+  background: #242422;
+  color: var(--st-ink);
+  font: inherit;
+  font-size: 13px;
+  padding: 10px 11px;
+}
+
+.st-textarea {
+  resize: vertical;
+  min-height: 72px;
+  line-height: 1.6;
+}
+
+.st-input::placeholder,
+.st-textarea::placeholder {
+  color: #67675f;
+}
+
+/* ------------------------------------------------------------------ rozmowa */
+
+/*
+ * WĄTEK ZAKOTWICZONY U GÓRY, nie dopchnięty do dołu (odbiór 2, R3).
+ *
+ * `margin-top: auto` spychało rozmowę na dno kolumny, więc przy krótkiej rozmowie dziura była
+ * NAD treścią: człowiek widział puste pół ekranu, a pod nim wątek. Makieta trzyma wątek u góry,
+ * a dziurę pod nim, bo czyta się od góry. Dno kolumny należy do pola, i to ono ma `margin-top:
+ * auto` na swoim opakowaniu.
+ */
+.st-chat {
+  padding-top: 48px;
+}
+
+.st-composer {
+  background: #141414;
+  border-radius: var(--st-radius-lg);
+  padding: 16px 16px 12px;
+}
+
+.st-composer textarea {
+  display: block;
+  width: 100%;
+  min-height: 46px;
+  border: 0;
+  background: transparent;
+  color: var(--st-ink);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.7;
+  resize: vertical;
+}
+
+.st-composer textarea:disabled {
+  color: var(--st-ink-3);
+}
+
+.st-composer__bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--st-ink-3);
+}
+
+/* ------------------------------------------ pusty projekt: „Co robimy w …?" (D-045) */
+
+/*
+ * Pytanie z nazwą projektu, jedna linia stanu i pole. Układ z prototypu przyjętego 20.09:
+ * `wm-chat h1` ma 28px, ciasny odstęp liter i dużą przerwę pod spodem, bo to jedyne zdanie na
+ * pustym ekranie i ma być pierwszą rzeczą, którą się czyta.
+ *
+ * NIE JEST WYŚRODKOWANE W PIONIE. Prototyp stawia pytanie na środku pustego pola; u nas pod
+ * spodem stoją cel, konta, dokumenty i lista rozmów, więc wyśrodkowanie zepchnęłoby je poniżej
+ * krawędzi ekranu i wyglądałoby, jakby projekt nic nie miał.
+ */
+.st-start {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 28px;
+}
+
+.st-start__ask {
+  font-size: 28px;
+  line-height: 1.3;
+  letter-spacing: -0.035em;
+  margin: 0;
+}
+
+.st-start__state {
+  margin: 0 0 14px;
+  color: var(--st-ink-3);
+  font-size: 12px;
+}
+
+/* Chip mówi, w czyim imieniu pójdzie rozmowa: projekt, tryb, konto. Bez tła w akcencie: akcent
+   znaczy STAN (D-040), a to jest etykieta, nie stan. */
+.st-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--st-line-strong);
+  border-radius: 999px;
+  color: var(--st-ink-2);
+  font-size: 11px;
+  line-height: 1.5;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.st-chip__label {
+  color: var(--st-ink-3);
+}
+
+/* Wybór konta wygląda jak chip, a nie jak formularz: to jest jedno słowo do zmiany, a nie pole
+   do wypełnienia. Strzałka przeglądarki zostaje, bo bez niej nikt nie wie, że da się kliknąć. */
+.st-chip__select {
+  border: 0;
+  background: transparent;
+  color: var(--st-ink);
+  font: inherit;
+  font-size: 11px;
+  padding: 0;
+  max-width: 14ch;
+}
+
+/* Okrągły przycisk wysyłki z prototypu (29px, pełny łuk). Jedyny element, który dostaje jasne
+   tło: to jest czynność, po której coś się dzieje, i ma być widoczna bez czytania. */
+.st-send {
+  /* BEZ `margin-left: auto`: to jest dziś zadanie wyboru silnika, który stoi tuż przed
+     przyciskiem (`.st-engine-pick`). Dwa elementy z `auto` w jednym wierszu dzielą wolne
+     miejsce po połowie, więc napis „Codex · …" lądował na środku paska zamiast przy przycisku,
+     jak w referencji. Zmierzone na zrzucie rundy 3. */
+  width: 29px;
+  height: 29px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: var(--st-ink);
+  color: var(--st-ground);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform var(--st-speed) var(--st-ease);
+}
+
+.st-send:hover {
+  transform: translateY(-1px);
+}
+
+/* ------------------------------------------------------------------ rozmowa z agentem (P2) */
+
+/*
+ * The conversation itself: turns, collapsed tool calls, and the one mark that moves.
+ *
+ * THE MARK WAVES ONLY WHILE A TURN IS IN FLIGHT. `data-waiting="yes"` is set by the component
+ * from one predicate (`isWaitingOnTheModel`), and the animation lives here rather than in the
+ * component so the reduced-motion block at the end of this file can switch it off with
+ * everything else. A screen that pulses while nothing runs is the thing ZAKRES-FUNKCJONALNY §5
+ * forbids, so the mark is tied to a status and not to a timer.
+ */
+
+/*
+ * Pasek stanu tury: stan, znacznik, zdanie, powód czekania i budżet.
+ *
+ * ZAWIJA SIĘ, A NIE ŚCISKA, i to jest poprawka ze zrzutu z 20.09
+ * (`output/porownanie-1-1/runda-1/studio-2-rozmowa-gora-bez-silnika.jpg`). Jeden wiersz mieścił
+ * trzy zdania naraz, więc każde dostało kolumnę po kilkanaście znaków i łamało się po jednym
+ * słowie. Zdania nie są równorzędne: pierwsze mówi, co się dzieje, a dwa pozostałe są
+ * przypisami, więc schodzą pod spód w całej szerokości zamiast walczyć o miejsce.
+ */
+.st-chat__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.st-chat__head > [data-waiting-reason],
+.st-chat__head > [data-budget] {
+  flex-basis: 100%;
+}
+
+.st-chat__log {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+/* ------------------------------------------------------------------ dokumenty projektu
+ *
+ * Lista ról jako zapadki, a treść w tej samej mierze i rytmie, co odpowiedź agenta: to jest ten
+ * sam rodzaj czytania. Liczba ustaleń pod zdaniem stoi w `--st-ink-3`, bo jest przypisem do
+ * zdania, a nie jego częścią.
+ */
+.st-doc > summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 2px;
+  cursor: pointer;
+}
+
+.st-doc > summary small {
+  color: var(--st-ink-3);
+}
+
+.st-doc__body {
+  max-width: 68ch;
+  padding: 6px 2px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.st-doc__section {
+  margin: 10px 0 0;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--st-ink);
+}
+
+.st-doc__sentence {
+  margin: 0;
+  color: var(--st-ink);
+  line-height: 1.6;
+}
+
+.st-doc__basis {
+  color: var(--st-ink-3);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ odpowiedź agenta
+ *
+ * MIARA TEKSTU, NIE SZEROKOŚĆ EKRANU. Około 68 znaków w linii to tyle, ile oko czyta bez
+ * gubienia wiersza; odpowiedź rozciągnięta na całą szerokość okna czyta się gorzej niż ta sama
+ * odpowiedź w kolumnie. Żadnej ramki i żadnego nowego koloru: wszystko z tokenów, które studio
+ * już ma, bo odpowiedź ma być spokojna, a nie oprawiona.
+ */
+.st-answer {
+  max-width: 68ch;
+  color: var(--st-ink);
+  font-size: 15px;
+  line-height: 1.62;
+}
+
+.st-answer > * + * {
+  margin-top: 12px;
+}
+
+.st-answer p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Jeden poziom śródtytułu, lekko większy od tekstu i w pełnym atramencie: ma prowadzić wzrok,
+   a nie krzyczeć. Odstęp nad nim jest większy niż pod, żeby tytuł należał do tego, co POD nim. */
+.st-answer h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--st-ink);
+}
+
+.st-answer > h3 + * {
+  margin-top: 6px;
+}
+
+.st-answer > * + h3 {
+  margin-top: 20px;
+}
+
+.st-answer ul,
+.st-answer ol {
+  margin: 0;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.st-answer li {
+  padding-left: 2px;
+}
+
+/* Pogrubiona etykieta na początku pozycji („Kategoria:") jest tym, po czym oko skacze w dół
+   listy, więc dostaje pełny atrament, a reszta zdania zostaje w kolorze tekstu. */
+.st-answer li > strong:first-child {
+  color: var(--st-ink);
+  font-weight: 640;
+}
+
+/* Cytat: cienka kreska z boku, bez tła i bez ramki. Tło zrobiłoby z cytatu kartę, a cytat jest
+   fragmentem tej samej wypowiedzi, nie osobnym obiektem. */
+.st-answer blockquote {
+  margin: 0;
+  padding-left: 14px;
+  border-left: 2px solid var(--st-line-strong);
+  color: var(--st-ink-2);
+}
+
+.st-answer code {
+  font-size: 13px;
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: var(--st-raised);
+  overflow-wrap: anywhere;
+}
+
+/* Podpis „Wynik" nad blokiem: ta sama rola, co „Ty" i „Agent" przy wiadomościach. */
+.st-msg[data-kind="summary"] .st-msg__who {
+  color: var(--st-ink-3);
+}
+
+.st-wave {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--st-ink-3);
+  flex: none;
+}
+
+.st-wave[data-waiting="yes"] {
+  background: var(--st-accent, #7aa2f7);
+  animation: st-wave-pulse 1.6s ease-in-out infinite;
+}
+
+/* P2 etap B: the live stream's own mark. Same rule as `.st-wave`, and the same reason it lives
+   here: `data-live-state` is set from the STATUS frames the stream sends, never from an event
+   arriving, so the animation cannot outlive the turn. `polling` is the honest third state: the
+   stream failed and the page is falling back to reloading. */
+.st-tag[data-live-state="running"] {
+  animation: st-wave-pulse 1.6s ease-in-out infinite;
+}
+
+.st-tag[data-live-state="polling"]::after {
+  content: " (odświeżanie co kilka sekund)";
+}
+
+@keyframes st-wave-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+
+.st-turn {
+  border-radius: var(--st-radius-lg);
+  padding: 10px 14px;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.st-turn p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.st-turn[data-who="user"] {
+  background: #1a1a1a;
+  align-self: flex-end;
+  max-width: 82%;
+}
+
+.st-turn[data-who="agent"] {
+  background: #141414;
+  max-width: 92%;
+}
+
+/* A tool call is COLLAPSED, never hidden: what the agent reached for is one click away, and an
+   answer with no visible basis is exactly what this block exists to prevent. */
+.st-tool {
+  border-left: 2px solid var(--st-line, #2a2a2a);
+  padding-left: 12px;
+  font-size: 12px;
+  color: var(--st-ink-3);
+}
+
+.st-tool summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  list-style: none;
+}
+
+.st-tool__name {
+  font-family: var(--st-mono, ui-monospace, monospace);
+  color: var(--st-ink-2, #bdbdbd);
+}
+
+.st-tool__body {
+  margin: 8px 0 0;
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+/* ------------------------------------------------------------------ komunikat po zapisie */
+
+.st-info {
+  margin-top: 16px;
+  padding: 11px 14px;
+  border-radius: var(--st-radius);
+  background: var(--st-surface);
+  color: var(--st-ink-2);
+  font-size: 12px;
+  line-height: 1.6;
+  animation: st-enter var(--st-speed) var(--st-ease);
+}
+
+.st-info[data-tone="absent"] {
+  color: var(--st-warn);
+}
+
+.st-info[data-tone="danger"] {
+  color: var(--st-danger);
+}
+
+/* ------------------------------------------------------------------ węższy ekran */
+
+@media (max-width: 860px) {
+  .st {
+    grid-template-columns: 186px minmax(0, 1fr);
+  }
+
+  .st__side {
+    padding-left: 12px;
+    padding-right: 10px;
+  }
+
+  .st__main {
+    padding: 18px 18px 22px;
+  }
+}
+
+@media (max-width: 620px) {
+  .st {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .st__side {
+    border-right: 0;
+    border-bottom: 1px solid var(--st-line);
+    padding-bottom: 16px;
+    /* Na wąskim ekranie kolumna stoi NAD treścią, więc przyklejona zabrałaby pół ekranu
+       rozmowie. Wysokość wraca do naturalnej, przewijanie też. */
+    position: static;
+    align-self: stretch;
+    height: auto;
+    overflow-y: visible;
+  }
+
+  .st-answer {
+    max-width: none;
+  }
+
+  .st__content {
+    padding-top: 26px;
+  }
+
+  .st__title {
+    font-size: 24px;
+  }
+
+  .st-pop__panel {
+    left: 0;
+    right: auto;
+    width: min(320px, calc(100vw - 32px));
+  }
+}
+
+@media (pointer: coarse) {
+  .st__item,
+  .st-btn,
+  .st-circle {
+    min-height: 44px;
+  }
+
+  .st-input,
+  .st-select,
+  .st-textarea {
+    font-size: 16px;
+  }
+}
+
+/* ------------------------------------------------------------------ ograniczony ruch */
+
+/*
+ * One block, at the end, covering EVERY animation and transition of the studio. WIZJA-WORKSPACE
+ * asks for it twice: the mark is static under this preference, and so is the panel motion.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .st,
+  .st *,
+  .st *::before,
+  .st *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+
+/* ------------------------------------------------------------------ pasek pola rozmowy
+ *
+ * Referencja ma w tym pasku dwie rzeczy: kółko „+" po lewej i TEKSTOWY wybór silnika po prawej
+ * („Codex · Studio ⌄" 11 px). Do 21.09 stały tam trzy chipy z obwódką, w tym dwa powtarzające
+ * to, co widać wyżej (nazwa projektu w pytaniu, tryb w prawym górnym rogu ramy). Odbiór 1,
+ * różnica nr 2.
+ */
+.st-engine-pick {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--st-ink-3);
+  font-size: 11px;
+}
+
+.st-engine-pick .st-chip__select {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+}
+
+/*
+ * PRZYCISK WYSYŁKI W ROZMOWIE: WYŁĄCZONY PRZY PUSTYM POLU, BEZ SKRYPTU (odbiór 1 nr 19, poprawka
+ * z odbioru 2).
+ *
+ * DWIE MAKIETY, DWIE ZASADY, i to nie jest niekonsekwencja. Makieta ROZMOWY gasi przycisk, póki
+ * nie ma czego wysłać (tło #272727, bez ikony); makieta RAMY, z której idzie pole PROJEKTU, ma
+ * przycisk jasny zawsze. Każde pole idzie za swoją makietą, więc reguła celuje w formularz
+ * rozmowy, a nie w każdy formularz w pudełku pola.
+ *
+ * Pierwsza wersja miała selektor `.st-composer form:has(…)` i nie trafiała w nic: w rozmowie to
+ * SAM formularz nosi klasę `st-composer`, więc nie ma w nim drugiego formularza (odbiór 2).
+ *
+ * `:placeholder-shown` jest prawdziwe dokładnie wtedy, gdy człowiek nic nie napisał, więc pytanie
+ * „czy jest co wysłać" zadaje sam arkusz: bez JS, bez stanu do zsynchronizowania.
+ * `pointer-events: none` dokłada to, czego sam wygląd nie daje.
+ */
+form.st-composer:has(textarea:placeholder-shown) .st-send {
+  background: #272727;
+  color: transparent;
+  pointer-events: none;
+}
+
+/* „Przerwij" i „Wznów" przy stanie tury: cicho, bo to rzadkie czynności, i na końcu wiersza,
+   bo pierwsze jest to, co się dzieje (odbiór 1, różnica nr 20). */
+.st-turn-aside {
+  margin-left: auto;
+}
+
+/* ------------------------------------------------------------------ okno kont projektu
+ *
+ * Referencja ma tu OKNO, nie formularz (odbiór 1, różnica nr 4): 340 px, tytuł 19 px, pod nim
+ * nazwa projektu, konta w sekcjach po osobie, a przypisanie jako ZNACZNIK przy koncie (✓ albo +),
+ * nie jako osobna lista z natywnym `select`. Różnica jest w tym, co człowiek widzi: znacznik
+ * pokazuje od razu, czego projekt NIE używa, a mógłby.
+ */
+.st-pop__panel--dialog {
+  width: 340px;
+  max-width: 92vw;
+  padding: 24px;
+  border-radius: 18px;
+  box-shadow: 0 24px 60px rgb(0 0 0 / 55%);
+}
+
+.st-pop__panel--dialog .st-pop__title {
+  font-size: 19px;
+  letter-spacing: -0.02em;
+  margin-bottom: 2px;
+}
+
+/* SELEKTOR Z DWIEMA KLASAMI, NIE JEDNĄ, i to nie jest ozdoba: `.st p{margin:0}` z początku
+   arkusza ma swoistość 0,1,1, więc bije samotną klasę 0,1,0 niezależnie od kolejności. Ta sama
+   pułapka, co przy przełączniku przestrzeni (odbiór 1, nr 1): zmierzone `margin-bottom: 0px`
+   przy regule mówiącej 34 px. */
+.st-pop__panel--dialog .st-pop__subtitle {
+  /* Odstępy z referencji, zmierzone na `m-rama-konta-projektu.png`: od podtytułu do pierwszej
+     osoby 58 px, między wierszami kont 58 px, od osoby do jej pierwszego wiersza 41 px. Okno
+     ma oddychać, bo to jest lista do przejrzenia, a nie formularz do wypełnienia. */
+  margin: 0 0 34px;
+  color: var(--st-ink-3);
+  font-size: 13px;
+}
+
+.st-pop__close {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  width: 31px;
+  height: 31px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--st-ink-3);
+  cursor: pointer;
+}
+
+.st-pop__close:hover {
+  background: var(--st-raised);
+  color: var(--st-ink);
+}
+
+.st-accounts-group + .st-accounts-group {
+  margin-top: 28px;
+}
+
+.st-pop__panel--dialog .st-accounts-person {
+  margin: 0 0 20px;
+  color: var(--st-ink-3);
+  font-size: 12px;
+}
+
+.st-accounts-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 20px;
+}
+
+.st-account-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  /* Wiersz konta ma 38 px, jak w referencji: plakietka 27 px plus oddech. Razem z `gap: 20px`
+     listy daje to rytm 58 px, czyli ten, który zmierzyłem na makiecie. */
+  min-height: 38px;
+}
+
+.st-platform-badge {
+  width: 27px;
+  height: 27px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--st-raised);
+  color: var(--st-ink-3);
+  font-size: 10px;
+}
+
+.st-account-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.st-account-name small {
+  color: var(--st-ink-3);
+  font-size: 11px;
+}
+
+/* Znacznik przypisania: ✓ przy koncie, którym projekt pracuje, + przy tym, które może wziąć.
+   Oba są PRZYCISKAMI jednego formularza, więc kliknięcie robi prawdziwą operację, a nie
+   przełącza obrazek. */
+.st-account-mark {
+  margin-left: auto;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--st-ink-3);
+  cursor: pointer;
+}
+
+.st-account-mark[data-assigned="tak"] {
+  color: var(--st-accent);
+}
+
+.st-account-mark:hover {
+  background: var(--st-raised);
+}
+
+.st-accounts-manage {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 18px;
+  font-size: 11px;
+}
+
+/* ------------------------------------------------------------------ ekrany listy projektu
+ *
+ * Podtytuł z nazwą projektu pod tytułem ekranu (odbiór 1, nr 22): tytuł mówi, CO to za ekran,
+ * podtytuł, CZYJ jest. Bez niego dwa projekty wyglądają na Publikacjach identycznie.
+ */
+/* Jak wyżej: `.st p{margin:0}` (0,1,1) kasował ten margines, więc podtytuł kleił się do tytułu,
+   a lista stała 0 px pod nim zamiast 28 (odbiór 2). */
+.st .st__subtitle {
+  margin: 8px 0 28px;
+  color: #777771;
+  font-size: 12px;
+}
+
+/*
+ * Społeczności jako JEDNA powierzchnia z wierszami, jak w `m-rama-spolecznosci.png` (nr 6).
+ * Język stanu zostaje z kart i liczy go ta sama funkcja, więc ekran i rozmowa nie mogą
+ * powiedzieć o jednej społeczności dwóch różnych rzeczy.
+ */
+.st-communities-list {
+  width: 100%;
+  max-width: 720px;
+  padding: 8px 20px;
+  border-radius: 20px;
+  background: #131313;
+}
+
+.st-community-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 0;
+  min-height: 80px;
+}
+
+.st-community-row + .st-community-row {
+  border-top: 1px solid rgb(255 255 255 / 4%);
+}
+
+.st-community-row__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+  font-size: 13px;
+}
+
+.st-community-row__body small {
+  color: var(--st-ink-3);
+  font-size: 11px;
+}
+
+.st-community-row__state {
+  color: var(--st-ink-3);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.st-communities-list .st-platform-badge {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+}
+
+.st-communities-note {
+  max-width: 720px;
+  margin-top: 14px;
+}
+
+/*
+ * WIERSZ LISTY ROZMÓW WEDŁUG `wm-row` Z REFERENCJI (odbiór 1, różnica nr 21).
+ *
+ * Data stała w 14 px pełnym atramentem, czyli JAŚNIEJ i WIĘKSZEJ niż tytuł rozmowy (13 px) i jej
+ * wynik (11 px szary). Wiersz mówił wtedy „najważniejsza jest godzina", a najważniejsze jest,
+ * o czym była rozmowa. Referencja trzyma informację drugorzędną w 11 px szarym i tak ma być tu.
+ */
+[data-block="rozmowy"] .st-row time {
+  color: var(--st-ink-3);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+[data-block="rozmowy"] .st-row__body strong {
+  font-size: 13px;
+  font-weight: 400;
+}
+
+/* Dok z awatarem na dole paska (odbiór 1, nr 16). Referencja ma tam kółko i awatar 30 px;
+   kółka „+" nie renderujemy, dopóki nie ma prawdziwego działania, więc zostaje sam awatar. */
+.st__dock {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.st__dock .st-pop__panel {
+  top: auto;
+  bottom: calc(100% + 8px);
+}
+
+/* Stopka paska zjeżdża na dno kolumny, jak w referencji: nazwa przestrzeni i dok są ostatnie,
+   a nie „zaraz po nawigacji". Przy długiej liście projektów pasek i tak się przewija, i to jest
+   różnica zależna od danych, którą odbiór 1 tak właśnie nazwał (nr 17). */
+.st__foot {
+  margin-top: auto;
+}
+
+
+/* Ikony nawigacji 16 px, ZMIERZONE NA MAKIECIE w odbiorze 2 (16 x 16).
+   Arkusz referencji mówi w tym miejscu 14 px (`.wm-navigation … svg`), więc dwie strony tej samej
+   makiety się nie zgadzają: reguła mówi jedno, wyrenderowany prototyp drugie, bo `lucide`
+   podmienia `<i>` na `<svg>` z własnym rozmiarem. Idziemy za POMIAREM, bo porównujemy się z tym,
+   co człowiek widzi, a nie z tym, co deklaruje arkusz. Rozbieżność zapisana w POSTEP.md.
+   Selektor z `.st`, bo reguła referencji ma element i wygrywa z samą klasą. */
+.st .st__subnav a.st__item .ic,
+.st .st__nav a.st__item .ic {
+  width: 16px;
+  height: 16px;
+}
+
+/*
+ * GÓRA PASKA (odbiór 2, nr 1). Trzy rzeczy naraz, bo to jeden wiersz: zapadka przełącznika
+ * rozciąga się na całą szerokość, żeby chevron stanął przy prawej krawędzi; nazwa przestrzeni
+ * jest jasna (#f3f3f1), a nie szara z `.st-btn[data-kind="quiet"]`; znak zaczyna się od 23 px,
+ * czyli od wcięcia paska z referencji.
+ */
+/* BEZ własnego wcięcia: wcięcie ma pasek z referencji (`.wm-sidebar` 22 px), a dołożenie tu
+   drugiego przesuwało znak na x=45 zamiast 23 (odbiór 2, nr 1). Reguła dodająca do układu
+   referencji, po raz kolejny. */
+
+.st__top .st-pop {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.st__top .st-pop > summary {
+  width: 100%;
+  color: #f3f3f1;
+}
+
+/* Chevron przy wyborze silnika: 16 px, jak w referencji. */
+.st-engine-pick .ic {
+  width: 16px;
+  height: 16px;
+}
+
+
+/*
+ * Co się przewija w kolumnie głównej: TREŚĆ nad polem. Pole zostaje na dole, bo `wm-bottom` ma
+ * `margin-top: auto`, a kolumna ma teraz dno (odbiór 2, R2/N3/R3).
+ */
+.st-start.wm-chat {
+  min-height: 0;
+}
+
+.st-start.wm-chat > [data-block="rozmowy"],
+.st-chat-view .st-thread {
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/*
+ * Pasek przewijania tych dwóch regionów rysuje się TAK SAMO, jak w liście projektów, i z tego
+ * samego powodu: `scrollbar-width` (stało tu wcześniej) wyłącza reguły `::-webkit-scrollbar`
+ * w Chrome, a nakładkowy pasek nie zajmuje szerokości i na zrzucie go nie ma. Ucięty wiersz bez
+ * paska wygląda jak koniec listy.
+ */
+.st-start.wm-chat > [data-block="rozmowy"]::-webkit-scrollbar,
+.st-chat-view .st-thread::-webkit-scrollbar {
+  width: 8px;
+}
+
+.st-start.wm-chat > [data-block="rozmowy"]::-webkit-scrollbar-thumb,
+.st-chat-view .st-thread::-webkit-scrollbar-thumb {
+  background: #3a3a38;
+  border-radius: 4px;
+}
+
+/*
+ * Widok rozmowy też jest kolumną o dnie: wątek przewija się w środku, pole zostaje na dole.
+ * Bez tego sama sekcja rosła z treścią i pole lądowało na 1817 px przy oknie 784, czyli poza
+ * ekranem (zmierzone po R2; odbiór 2, N3).
+ */
+.st__content > .st-chat-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.st__content > .st-chat-view > .st-thread {
+  flex: 1;
+  /*
+   * SZEROKOŚĆ WĄTKU NIE MOŻE ZALEŻEĆ OD TREŚCI (odbiór 3, N4). `.st-thread{max-width:670px;
+   * margin:auto}` z makiety opisuje blok w normalnym przepływie, gdzie `auto` daje pełną
+   * szerokość. Tutaj wątek jest dzieckiem kolumny flex, a w niej `width` domyślnie idzie od
+   * treści: rozmowa zakończona miała 615 px, żywa 606 px, ta z kartami 670 px, więc wiadomości
+   * i znacznik jeździły w prawo o 27 do 32 px względem pola, które ma stałe 598 px. Stopka
+   * dostała `width: 100%` przy N3; wątek nie, i to była cała różnica.
+   */
+  width: 100%;
+}
+
+/*
+ * Stopka rozmowy w kolumnie flex: `margin: auto` z makiety (poziome wyśrodkowanie) w kolumnie
+ * flex zaczyna wciągać TAKŻE pion, więc pole skurczyło się do treści i zawisło w środku ekranu
+ * zamiast stanąć na dole (zmierzone po R2). W makiecie sekcja nie jest kolumną flex, więc
+ * pytanie nie powstawało; u nas powstaje i odpowiedź brzmi: wyśrodkowanie zostaje poziome.
+ */
+.st__content > .st-chat-view > .st-footer {
+  width: 100%;
+  margin: 0 auto;
+  flex: 0 0 auto;
+}
+
+/* Linia aktywności nad polem (E-H). Wysokość i ton z referencji: 36,5 px wiersza, tekst cichy,
+   liczba jako odsyłacz, godzina po prawej. */
+.st-activity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  margin: 0 0 10px;
+  color: var(--st-ink-3);
+  font-size: 11px;
+}
+
+.st-activity a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: inherit;
+}
+
+.st-activity a:hover {
+  color: var(--st-ink);
+}
+
+.st-activity .ic {
+  width: 12px;
+  height: 12px;
+}
+
+.st-activity time {
+  margin-left: auto;
+}
+
+/*
+ * DWA ODSTĘPY OZDOBNE ODDAJĄ POŁOWĘ LIŚCIE PROJEKTÓW (odbiór 3, R6).
+ *
+ * Budżet paska przy oknie 1533x784, policzony, nie zgadnięty. Kolumna ma 782 px, bo rama zjada
+ * po pikselu obramowania z góry i z dołu:
+ *
+ *   25 wypełnienie górne + 37 nagłówek + 51 odstęp + 24 „Projekty" + 10 odstęp
+ *   + REGION + ODSTĘP + 17 „W projekcie" + 10 + 196 nawigacja projektu
+ *   + ODSTĘP + 95 nawigacja przestrzeni + 42 stopka + 97 wypełnienie dolne (dok) = 782
+ *
+ * Przy odstępach makiety (34 px każdy) na region zostaje 112 px. Bieżący projekt z trzema
+ * rozmowami i „Nową rozmową" to 35 + 3 x 27 + 27 = 146 px, czyli przy odstępach makiety co do
+ * piksela widać półtora wiersza i nic więcej. Makieta ma DWA projekty i żadnych rozmów w pasku,
+ * więc jej 34 px to powietrze; u nas to samo powietrze zabiera miejsce liście, która rośnie
+ * z danymi.
+ *
+ * 14 px zamiast 34 px oddaje regionowi 40 px i daje 150 px, czyli wiersz bieżącego projektu,
+ * trzy rozmowy i „Nowa rozmowa" mieszczą się z czterema pikselami zapasu, a następny projekt
+ * jest ucięty w połowie, co razem z paskiem przewijania mówi, że lista idzie dalej. Hierarchia
+ * zostaje: między listą a nawigacją projektu i między projektem a przestrzenią nadal jest
+ * przerwa, tyle że węższa. To jest ŚWIADOMA różnica wobec referencji i jedyne miejsce, w którym
+ * runda 5 rusza odstęp makiety; powrót to jedna liczba.
+ *
+ * Swoistość musi być wyższa niż w regułach referencji, bo `frame.css` wchodzi PO tym arkuszu
+ * (`app/(studio)/layout.tsx`): sama `.st .wm-global-nav` przegrywa remis kolejnością.
+ */
+.st .st__group.wm-project-label,
+.st .st__nav.wm-global-nav {
+  margin-top: 14px;
+}
+
+/*
+ * RAMA MIEŚCI SIĘ W OKNIE RAZEM ZE SWOIM OBRAMOWANIEM (odbiór 3, N5).
+ *
+ * Referencja daje ramie `min-height: 760px`, bo w prototypie stoi ona na stronie, którą i tak się
+ * przewija. U nas rama JEST stroną, a jej obramowanie 1 px z góry i 1 px z dołu doliczało się do
+ * wysokości okna: dokument miał 786 px przy oknie 784 px i strona jeżdżyła o dwa piksele, co
+ * widać jako drganie przy każdym kółku myszy.
+ *
+ * `height: 100dvh` przy `box-sizing: border-box` (dziedziczone z `.st *`) wlicza obramowanie do
+ * tych 784 px, a scena i obie kolumny biorą sto procent RAMY zamiast okna. Poniżej 762 px wysokości
+ * okna `min-height: 760px` z referencji dalej wygrywa i rama wystaje, i tak ma być: to jest okno
+ * mniejsze niż projekt.
+ */
+.st.st--framed .wm-shell {
+  height: 100dvh;
+}
+
+.st.st--framed .wm-scene {
+  height: 100%;
+  /* Sama wysokość sceny nie wystarczy: wiersz siatki jest liczony z zawartości i ROŚNIE, kiedy
+     kolumna treści jest wyższa niż okno, a wtedy `height: 100%` w pasku liczy się od urośniętego
+     wiersza (zmierzone: 981 px przy oknie 784 px). `minmax(0, 1fr)` przybija wiersz do wysokości
+     sceny, więc obie kolumny dostają dokładnie tyle, ile jest miejsca, i przewijają się w środku. */
+  grid-template-rows: minmax(0, 1fr);
+}
+
+/*
+ * PUSTKA NAD POLEM ODDAJE MIEJSCE LIŚCIE ROZMÓW (odbiór 3, R5).
+ *
+ * Na wejściu do projektu lista „Rozmowy" była regionem 185 px przy 258 px treści, czyli widać
+ * było dwa wiersze z trzech, a pod nią stało 71 px pustki do linii aktywności. Kolumna ma stałą
+ * wysokość (R2), więc każdy piksel powietrza jest zabrany liście, a nie dołożony do strony.
+ *
+ * Rachunek dla okna 1533x784, wszystko zmierzone:
+ *
+ *   miejsce w `.st-start` po jej wyściółce 50 px: 606 px
+ *   potrzeba: 38 pytanie + 12 + 18 stan + 21 konta + 40 + 34 odstęp sekcji + 258 lista
+ *             + 65 wyściółka dna + 170 (aktywność i pole) + 24 przerwy kolumny = 680 px
+ *
+ * Brakuje 74 px i biorą się z trzech miejsc, wszystkie ozdobne, żadne nie jest treścią:
+ *
+ *   40 px `.st__content{padding-top}` NIE MA W REFERENCJI. Makieta stawia `.wm-chat` zaraz pod
+ *      nagłówkiem (`.wm-content` bez wyściółki, h1 na y=110), a u nas nagłówek pytania stał
+ *      40 px niżej niż w makiecie. Zdejmujemy to tylko tam, gdzie mieszka `.st-start`: ekrany
+ *      rozmowy porównywały się z INNĄ makietą (`chat-inline-actions`) i były odebrane;
+ *   20 px z wyściółki dna: `.wm-bottom` ma w referencji 45 px, a motyw ciemny podnosi je do 65.
+ *      Wracamy do liczby bazowej referencji zamiast wymyślać własną;
+ *   14 px z odstępu sekcji (34 na 20). Nad sekcją stoi już 40 px marginesu wiersza kont, więc
+ *      przerwa między kontami a listą ma i tak 60 px.
+ *
+ * Razem 74 px, czyli lista dostaje pełne 258 px i widać trzy wiersze. Przy czwartej rozmowie
+ * lista znów się skurczy i wtedy MUSI być widać pasek przewijania regionu (`.st__scroll`
+ * i ten region mają go stale, patrz reguła wyżej): ucięty wiersz bez paska to lista, która
+ * wygląda na skończoną.
+ */
+.st__content:has(> .st-start) {
+  padding-top: 0;
+}
+
+.st .st-start > .wm-bottom {
+  padding-top: 45px;
+}
+
+.st-start > .st__section {
+  margin-top: 20px;
+}

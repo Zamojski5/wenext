@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+.next/
+out/
+
+# Sekrety i stan lokalny — nigdy do repo
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+auth.json
+
+# Profile przeglądarki, artefakty runtime, dowody — szyfrowane lub lokalne
+var/
+data/
+artifacts/
+profiles/
+codex-home/
+*.log
+
+# Raporty Go/No-Go są generowane; commitujemy tylko te zatwierdzone ręcznie
+reports/*.json
+reports/*.html
+!reports/.gitkeep
+
+# System
+.DS_Store
+.idea/
+.vscode/
+
+# Generowane przez `make env` — ścieżki konkretnej maszyny ORAZ `.token_seed`
+# (0600, ziarno poświadczeń Dockera). Ignorujemy CAŁY katalog: wyliczanie pojedynczych
+# plików przepuszczało `.token_seed` i `.token_seed.lock` do `git add -A`.
+infra/docker-config/
+
+# Wyniki lokalne, zrzuty baz i nagrania: nigdy do repo (output/ jest poza gitem, a zrzut bazy
+# w historii nie daje się cofnąć). Migracje są jedynymi plikami .sql, które śledzimy.
+output/
+*.sql
+!db/migrations/*.sql
+*.sql.gz
+*.dump
+*.mp4
+*.mov
+*.wav
+*.har

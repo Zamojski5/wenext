@@ -1,0 +1,19 @@
+id: po-uwadze-czlowieka
+nazwa: Druga wersja po uwadze „za długie"
+wymiary: [poprawa_po_uwadze, wiernosc_profilowi, koszt_i_czas]
+watek:
+  zrodlo: fixture
+  spolecznosc: r/devops
+  tytul: jak mierzycie opóźnienia
+  tresc: Czym to mierzycie i co z tego wynika?
+  komentarze: 3
+cel: napisz odpowiedź, potem popraw ją po uwadze człowieka
+uwaga_czlowieka: za długie, wystarczy akapit
+dostepne_dla_obu:
+  - profil: osoba pisząca zwięźle
+oczekiwane_zachowanie:
+  opis: >-
+    Druga wersja wyraźnie krótsza i nadal odpowiadająca na pytanie. Ścieżka, która nie ma jak
+    przyjąć uwagi, kończy na pierwszej wersji i to jest właśnie mierzona różnica.
+  automat:
+    maks_znakow_po_uwadze: 900

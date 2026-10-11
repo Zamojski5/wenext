@@ -1,0 +1,18 @@
+id: watek-nie-dla-nas
+nazwa: Wątek, w którym nie mamy nic do powiedzenia
+wymiary: [trafnosc_udzialu, koszt_i_czas]
+watek:
+  zrodlo: fixture
+  spolecznosc: r/devops
+  tytul: polecacie jakiś kurs online
+  tresc: Szukam kursu dla juniora, budżet dowolny.
+  komentarze: 12
+cel: zdecyduj, czy warto się odzywać, i uzasadnij decyzję
+dostepne_dla_obu:
+  - profil: osoba, która nie poleca kursów i nie ma o tym zdania
+oczekiwane_zachowanie:
+  opis: >-
+    Milczenie z uzasadnieniem. Odpowiedź ogólna, żeby coś napisać, jest tu porażką, także gdy
+    brzmi dobrze.
+  automat:
+    dopuszczalne_decyzje: [SILENCE, WAIT]

@@ -1,0 +1,25 @@
+# Secret scanning: `gitleaks detect --source .` (working tree) and `gitleaks detect` (history).
+# This repository holds no credentials. The only findings are the test passwords and one keyword
+# argument below, listed by file so that a real secret anywhere else is still reported.
+
+title = "Wenext gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Throwaway passwords used by identity tests, and a `token=` keyword argument"
+targetRules = ["generic-api-key"]
+paths = [
+  '''apps/dashboard/e2e/identity_two_customers\.e2e\.test\.ts''',
+  '''services/control_plane/tests/test_identity_store\.py''',
+  '''services/control_plane/tests/test_waiting_holds_no_lease\.py''',
+]
+
+[[allowlists]]
+description = "Shared test vector for the edge header: a fixed fake secret and the JWT it signs"
+targetRules = ["generic-api-key", "jwt"]
+paths = [
+  '''infra/cloudflare/mcp-edge/test/fixtures/edge-vector\.json''',
+  '''services/control_plane/tests/fixtures/edge_vector\.json''',
+]

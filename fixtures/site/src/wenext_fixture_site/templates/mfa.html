@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Weryfikacja dwuskładnikowa — {{ site_name }}{% endblock %}
+{% block page_id %}mfa{% endblock %}
+{% block content %}
+<section class="narrow">
+  <h1>Drugi składnik</h1>
+  <p class="lead" data-testid="mfa-instruction">
+    Wysłaliśmy sześciocyfrowy kod na kanał powiązany z kontem. Wpisz go poniżej.
+  </p>
+  {% if error %}<p class="notice negative" data-testid="mfa-error">{{ error }}</p>{% endif %}
+  <form method="post" action="/mfa" data-testid="mfa-form">
+    <label for="code">Kod</label>
+    <input id="code" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6"
+           autocomplete="one-time-code" required>
+    <input type="hidden" name="next" value="{{ next }}">
+    <button type="submit" data-testid="mfa-submit">Potwierdź</button>
+  </form>
+  <p class="hint">
+    Kodu nie ma na tej stronie i nie da się go z niej odczytać. To celowe: ekran drugiego
+    składnika modeluje krok, którego przeglądarka bez okna nie przejdzie sama.
+  </p>
+</section>
+{% endblock %}

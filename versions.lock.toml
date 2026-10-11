@@ -1,0 +1,216 @@
+# Jedyne źródło prawdy dla przypiętych wersji.
+#
+# Definition of Done fazy E1.F0 (L5180): "ustalono exact browser i Codex versions".
+# Ten plik JEST tym ustaleniem. Zmiana którejkolwiek wartości wymaga ADR-a i ponownego
+# uruchomienia kontraktu CDP (`make gonogo`), bo capability snapshot jest ważny wyłącznie
+# dla builda, na którym został wykonany (L2580, L4381).
+#
+# Wszystkie hasze, rozmiary i digesty poniżej zostały pobrane z GCS JSON API oraz
+# z rejestru Dockera 2026-08-30 i zweryfikowane uruchomieniem. Nie są przepisane z pamięci.
+#
+# Strukturę tego pliku czyta `make check-versions` — zmiana nazw sekcji wymaga
+# poprawienia tamtego celu.
+
+[meta]
+locked_at = "2026-08-30"
+locked_for_phase = "E1.F0"
+
+# ---------------------------------------------------------------------------
+# Przeglądarka — patrz docs/adr/ADR-0002
+# ---------------------------------------------------------------------------
+# Stable (152.0.7977.64) NIE ma builda linux-arm64 — sprawdzone w known-good-versions
+# (28 wersji z linux-arm64, najstarsza 153.0.8001.0).
+# 153.0.8010.12 to pierwsza linia mająca JEDNOCZEŚNIE linux-arm64 i linux64, więc dev
+# na Apple Silicon i CI na amd64 używają tego samego exact executable (wymóg L4948).
+#
+# Ścieżka emulowana (linux/amd64 pod Rosettą) jest ODRZUCONA — patrz ADR-0002.
+
+[browser.chrome_for_testing]
+version = "153.0.8010.12"
+channel_at_lock_time = "Beta"
+# Zakaz mieszania Chrome / Chrome for Testing / Chromium / headless shell na jednym
+# profilu (L2308). BrowserSupervisor zapisuje ten znacznik do user-data-dir i odmawia
+# otwarcia profilu zapisanego innym buildem.
+profile_build_marker = "chrome-for-testing/153.0.8010.12"
+
+[browser.chrome_for_testing.downloads.linux-arm64]
+url = "https://storage.googleapis.com/chrome-for-testing-public/153.0.8010.12/linux-arm64/chrome-linux-arm64.zip"
+size = 195926016
+md5_base64 = "cvNEHdP94czbLvLdzI1d4A=="
+crc32c_base64 = "6Mt/JA=="
+gcs_generation = "1787694950497100"
+gcs_updated = "2026-08-25T21:55:50.577Z"
+unpacked_dir = "chrome-linux-arm64"
+
+[browser.chrome_for_testing.downloads.linux64]
+url = "https://storage.googleapis.com/chrome-for-testing-public/153.0.8010.12/linux64/chrome-linux64.zip"
+size = 195836009
+md5_base64 = "jZzsnTCZ7NfoJuQp7GY8qQ=="
+crc32c_base64 = "PjaQPA=="
+gcs_generation = "1787696957613313"
+gcs_updated = "2026-08-25T22:29:17.681Z"
+unpacked_dir = "chrome-linux64"
+
+# Weryfikacja przy starcie kapsuły: /json/version musi zwrócić dokładnie to.
+# Zmierzone na żywo 2026-08-30 w kontenerze arm64, non-root, sandbox włączony.
+[browser.chrome_for_testing.expected_cdp]
+browser_field = "Chrome/153.0.8010.12"
+protocol_version = "1.3"
+
+# Chromium: przeglądarka kapsuły X (D-051, 27.09.2026).
+# Google odmawia logowania w Chrome for Testing („This browser or app may not be secure"),
+# zmierzone w kapsule 27.09: to samo konto Google na tym samym ekranie przeszło w Chromium.
+# Kto loguje się do X przez Google, nie połączyłby konta wcale. Chromium nie jest pobierany:
+# przypięty obraz bazowy Playwrighta już go ma. `infra/browser/pin_chromium.py` przy budowie
+# obrazu żąda, żeby `--version` powiedziało dokładnie „Chromium <version>", i zapisuje znacznik
+# buildu obok binarki. Zmierzone na linux-arm64; na amd64 ten sam skrypt zatrzyma budowę, jeśli
+# obraz niesie tam inny build albo inną ścieżkę.
+[browser.chromium]
+version = "151.0.7922.34"
+source = "mcr.microsoft.com/playwright/python:v1.62.0-noble"
+executable = "/ms-playwright/chromium-1234/chrome-linux/chrome"
+profile_build_marker = "chromium/151.0.7922.34"
+
+[browser.chromium.expected_cdp]
+browser_field = "Chrome/151.0.7922.34"
+protocol_version = "1.3"
+
+# Profil seccomp zamiast --no-sandbox (który jest zakazany przez sekcję 4 i 14.4).
+[browser.seccomp]
+source = "https://raw.githubusercontent.com/microsoft/playwright/main/utils/docker/seccomp_profile.json"
+sha256 = "cc3e61cabda6bbc1e53e54d27ba4d55a9d3be829b6dd1a596f4a7b31b1cc7849"
+local_path = "infra/browser/seccomp_profile.json"
+
+# ---------------------------------------------------------------------------
+# Obrazy
+# ---------------------------------------------------------------------------
+# Wszystkie digesty to digesty LISTY MANIFESTÓW (multi-arch), nie pojedynczej
+# architektury — dzięki temu ten sam pin działa na arm64 i amd64.
+
+[images.postgres]
+ref = "postgres:18.6-trixie"
+digest = "sha256:4ef4dbc939d61acea57712655ddb4b4ab27419c913f94cca0cd57cb3ea3c2280"
+platforms = ["linux/amd64", "linux/arm64"]
+
+# Obraz bazowy kapsuły. Daje zależności systemowe Chromium i użytkownika non-root
+# `pwuser` (uid 1001). Chrome odmawia startu jako root bez --no-sandbox, więc non-root
+# nie jest preferencją, tylko warunkiem koniecznym.
+#
+# Wybrano `noble` zamiast `resolute`: oba mają wariant arm64 i oba mają TigerVNC
+# z mechanizmem osobnego hasła view-only. Patrz ADR-0003.
+[images.capsule_base]
+ref = "mcr.microsoft.com/playwright/python:v1.62.0-noble"
+arm64_digest = "sha256:bd0b5475930786e8c0b6a9fd7c7e8cbe11162b5bef8a9eb16c365eddbc337766"
+alt_ref = "mcr.microsoft.com/playwright/python:v1.62.0-resolute"
+alt_arm64_digest = "sha256:577015984398dd06bb43aad5200e3618e7a871f4f47b4841d9efa367a20daed9"
+
+# ---------------------------------------------------------------------------
+# Codex
+# ---------------------------------------------------------------------------
+# Oficjalny SDK Pythona ISTNIEJE — zweryfikowane na PyPI 2026-08-30.
+# SDK sam ciągnie przypiętą binarkę CLI, więc obie wersje muszą iść parami.
+[codex]
+python_sdk = "openai-codex==0.147.0"
+cli_bin = "openai-codex-cli-bin==0.147.0"
+requires_python = ">=3.10"
+# Kontrakt protokołu generujemy z ZAINSTALOWANEJ BINARKI, nie przepisujemy z dokumentacji.
+# Leży przy adapterze, a nie w `contracts/`, bo jest artefaktem konkretnej wersji CLI,
+# a nie typem domenowym — odtwarza go `generate_contract.py`.
+schema_artifact = "services/codex_runtime/codex_runtime/contract/"
+# Trasy model/effort są stałe i jawnie zapisane — bez pełnego Model Routera (L5266).
+default_model = "gpt-5.6-terra"
+default_effort = "medium"
+
+# ---------------------------------------------------------------------------
+# Reszta stosu
+# ---------------------------------------------------------------------------
+[stack]
+python = "3.12"
+playwright_python = "playwright==1.62.0"
+pydantic = "pydantic>=2.12"
+
+[stack.capsule_packages]
+tigervnc = "tigervnc-standalone-server"
+window_manager = "openbox"
+novnc = "v1.7.0"
+# Archiwum źródłowe noVNC z GitHuba dla tagu powyżej; sha256 policzony 2026-09-04 z pobranego
+# pliku (726 728 B). `infra/novnc/fetch_novnc.py` pobiera je przy buildzie obrazu gatewaya i
+# ODMAWIA przy innej sumie — noVNC to JavaScript wykonywany w przeglądarce założyciela obok
+# strumienia sterującego kapsułą, więc pin bez sumy byłby pinem tylko z nazwy (D-026, poziom 2).
+novnc_archive_url = "https://github.com/novnc/noVNC/archive/refs/tags/v1.7.0.tar.gz"
+novnc_archive_sha256 = "b1003a11b6e6e8d8f7f5e5586daae7f8ca651d8aee0aa155ff9ac841c48f52c6"
+
+# Stos JavaScriptu — dashboard z E1.F1 (L5190 „FastAPI, PostgreSQL, Next.js").
+#
+# Wersje pobrane i zweryfikowane 2026-08-31: `nodejs.org/dist/index.json` (najnowsza linia
+# LTS) i `registry.npmjs.org/next` (dist-tags.latest). Digest obrazu to digest LISTY
+# MANIFESTÓW, potwierdzony jako multi-arch (linux/amd64 + linux/arm64) — ten sam pin działa
+# na Apple Silicon i na CI. Nie są przepisane z pamięci.
+#
+# `check_versions.py` odmawia Dockerfile'a, który zapisuje `node:<inna wersja>` u siebie.
+[stack.js]
+node = "24.20.0"
+node_lts_line = "Krypton"
+npm = "11.19.0"
+node_image = "node:24.20.0-trixie-slim"
+node_image_digest = "sha256:50c3b2f6988dfc307b86e5301d69611af31f4789bdf232863b07d3b02fe55ae0"
+next = "16.3.3"
+
+# ---------------------------------------------------------------------------
+# Porty publikowane na host — JEDYNE ŹRÓDŁO PRAWDY (D-014)
+# ---------------------------------------------------------------------------
+# Niezmiennik nigdy nie brzmiał „jeden port". Brzmi: nic nie wychodzi poza pętlę zwrotną,
+# a to, co z niej korzysta, jest wypisane z nazwy. `check_versions.py` żąda, żeby zbiór
+# portów faktycznie publikowanych przez pliki compose był DOKŁADNIE RÓWNY tej liście —
+# w obie strony. Wpis, którego nikt nie publikuje, gnije tu i po miesiącu allowlista
+# przestaje cokolwiek znaczyć; port publikowany bez wpisu to wyciek.
+#
+# PUSTA LISTA JEST BŁĘDEM, nie stanem „nie ma czego sprawdzać": równość zbiorów spełniona
+# przez pustkę po obu stronach to `all([]) == True` w przebraniu (D-011).
+#
+# 9222 (CDP), 5900 i 5901 (VNC) są odrzucane NAWET stąd — L2353 i L5600 wyjmują je z
+# zasięgu hosta bezwarunkowo, więc nie da się ich tu przemycić.
+#
+# Tę samą listę wypisuje z nazwy `tests/test_published_ports.py`. Dołożenie trzeciego portu
+# wymaga świadomej edycji obu miejsc i widać ją w diffie.
+
+[[network.published_ports]]
+service = "gateway"
+port = 8760
+why = "noVNC + proxy RFB; jedyne wejście człowieka do kapsuły headful (E1.F0)"
+
+[[network.published_ports]]
+service = "gateway-x"
+port = 8761
+why = "ekran kapsuły X (Chromium, D-051): logowanie człowieka do konta X, ten sam gateway co 8760"
+
+[[network.published_ports]]
+service = "dashboard"
+port = 3000
+why = "dashboard Next.js (D-014). Control plane NIE jest publikowany — dashboard rozmawia z nim po stronie serwera (D-016)"
+
+# D-042 (koordynator pod autonomią założyciela, 19.09.2026, do przeglądu założyciela):
+# JEDEN WYJĄTEK od bezwarunkowej pętli zwrotnej, i tylko dla serwera. Usługa, która ma działać
+# niezależnie od laptopa, musi mieć drzwi z internetu; do tego dnia niezmiennik zakładał, że
+# jedynym hostem jest laptop autora. Wyjątek jest zawężony tak, żeby nie dało się go rozszerzyć
+# przez przypadek: `public_edge = true` działa WYŁĄCZNIE w pliku `compose.prod.yml`, wyłącznie
+# dla wypisanych tu portów i wyłącznie dla usługi `caddy`. Każdy inny wpis w tej sekcji zostaje
+# przy bezwarunkowym 127.0.0.1, a nakładka i tak domyślnie nasłuchuje na pętli zwrotnej:
+# wystawienie wymaga `WENEXT_EDGE_BIND=0.0.0.0` w `.env` na maszynie z adresem publicznym.
+
+[[network.published_ports]]
+service = "caddy"
+port = 80
+public_edge = true
+why = "ACME HTTP-01 i przekierowanie na https; tylko compose.prod.yml, tylko na serwerze (D-042)"
+
+[[network.published_ports]]
+service = "caddy"
+port = 443
+public_edge = true
+why = "jedyne drzwi z internetu do studia i ekranu kapsuły, TLS z Let's Encrypt (D-042)"
+
+[orchestration.docker_compose]
+# Plik compose bez klucza `version:` — usunięty ze specyfikacji.
+schema = "compose-spec"
+requires_profiles = ["test", "report", "manual", "codex", "dashboard"]

@@ -1,0 +1,78 @@
+# =============================================================================
+# compose.test.yml — nadpisanie dla przebiegu testowego
+#
+# Używane wyłącznie przez `make test`, `make evals` i CI:
+#   docker compose -f docker-compose.yml -f compose.test.yml --profile test ...
+#
+# Co ten plik zmienia i dlaczego:
+#
+#   1. Baza jedzie na tmpfs z wyłączonym fsync. Przebieg testowy zaczyna od
+#      pustego schematu i kończy jego wyrzuceniem, więc trwałość jest tu
+#      kosztem bez zysku. UWAGA: to nadpisanie NIE MOŻE nigdy trafić do
+#      `make up` — suita `lease_fencing` (D18) dowodzi trwałości generacji
+#      leasa i na fsync=off dowodziłaby czegoś innego, niż twierdzi.
+#      Dlatego D18 musi uruchamiać tę jedną suitę przeciw stackowi z `make up`.
+#
+#   2. Gateway przestaje publikować port (`!reset`). Przebieg testowy ma nie
+#      walczyć o 127.0.0.1:8760 ze stackiem deweloperskim, który już chodzi.
+#      Testy dobijają się do gatewaya po nazwie w sieci capsulenet.
+#      Po tym nadpisaniu liczba publikowanych portów w przebiegu testowym
+#      wynosi ZERO — nadal spełnia DoD, tylko mocniej.
+#
+#   3. Wszystko jest jednorazowe: restart: "no", deterministyczny seed fixture'ów,
+#      krótszy TTL StreamTicketu (żeby test wygaśnięcia biletu nie trwał 2 minut).
+# =============================================================================
+
+services:
+  db:
+    volumes: !reset []
+    tmpfs:
+      # uid/gid 999 = użytkownik `postgres` w obrazie library/postgres.
+      - /var/lib/postgresql:size=1g,uid=999,gid=999,mode=0700
+    command:
+      - postgres
+      - -c
+      - fsync=off
+      - -c
+      - full_page_writes=off
+      - -c
+      - synchronous_commit=off
+      - -c
+      - log_min_duration_statement=500
+    restart: "no"
+
+  capsule:
+    environment:
+      # Przebieg testowy zawsze startuje headless. Tryb INTERACTIVE jest
+      # włączany PRZEZ TEST (suita headful_exception), nie przez konfigurację —
+      # inaczej test przekazania profilu dowodziłby tylko tego, że ustawiliśmy
+      # zmienną środowiskową.
+      WENEXT_BROWSER_MODE: HEADLESS
+      WENEXT_CAPSULE_ID: capsule-test
+      WENEXT_DEVTOOLS_PORT_FILE: /var/wenext/profiles/capsule-test/DevToolsActivePort
+    restart: "no"
+
+  gateway:
+    ports: !reset []
+    environment:
+      WENEXT_STREAM_TICKET_TTL_SECONDS: "15"
+    restart: "no"
+
+  fixture-site:
+    environment:
+      # Stały seed — evale i asercje na treści muszą być powtarzalne.
+      WENEXT_FIXTURE_SEED: "20260830"
+      WENEXT_FIXTURE_DETERMINISTIC: "true"
+    restart: "no"
+
+  tests:
+    environment:
+      WENEXT_ENV: test
+      WENEXT_CAPSULE_ID: capsule-test
+      # Testcontainers jest w pinach (4.15.0) na potrzeby suit, które podnoszą
+      # własnego Postgresa. W kontenerze wymaga zamontowanego socketu Dockera —
+      # świadomie go NIE montujemy (docker-outside-of-docker to dziura w izolacji
+      # ruchomego runnera). Suity oparte o testcontainers uruchamiaj z hosta:
+      #   make test-host
+      TESTCONTAINERS_RYUK_DISABLED: "true"
+    restart: "no"

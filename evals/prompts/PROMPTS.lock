@@ -1,0 +1,5 @@
+# Zamrożone hasze promptów. Zmiana promptu bez zmiany tej listy zatrzymuje evale.
+# Regeneracja: python -m evals.harness.prompts
+discovery  e1e19d1006c1a3d787e0f4f3cfb4978e999faec7f962fb19a69eaed82b31b625
+draft_reply  ee4086991428aa0886835ce9ee1c4c13827d497c3206a7f404e5804c01c4d4e7
+thread_quality  23b480a70fac67df942f30545b6d02cb3dd86ac1775ef8f542944cce71150ba9

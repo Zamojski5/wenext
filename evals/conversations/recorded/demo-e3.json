@@ -1,0 +1,10 @@
+{
+  "_recording": "synthetic answer written by an agent for the offline runner; not a model output and not the operator's judgment",
+  "decision": "WAIT",
+  "draft": null,
+  "target_message_id": "m1",
+  "contribution": null,
+  "brief_rationale": "Four minutes old, no replies, a broad question. The profile has no Postgres 18 production experience to report. Waiting for the first answers to see what the poster actually needs.",
+  "sources_used": [],
+  "confidence": 0.7
+}

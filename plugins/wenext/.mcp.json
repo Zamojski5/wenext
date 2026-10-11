@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "wenext": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/wenext",
+      "args": [
+        "mcp"
+      ],
+      "timeout": 120000
+    }
+  }
+}

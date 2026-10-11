@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Lab — {{ site_name }}{% endblock %}
+{% block page_id %}lab{% endblock %}
+{% block content %}
+<h1>Lab</h1>
+<p class="lead">Strony istniejące wyłącznie po to, żeby dało się zweryfikować kontrakt CDP.</p>
+<ul class="plain">
+  <li><a href="/lab/popup">Popup i nowa karta</a> — <code>window.open</code> oraz <code>target="_blank"</code></li>
+  <li><a href="/lab/delayed">Opóźnione renderowanie</a> — treść pojawia się po ok. 2 s przez JS</li>
+  <li><a href="/challenge">Ekran challenge</a> — wyzwalany też automatycznie po serii szybkich żądań</li>
+</ul>
+{% endblock %}

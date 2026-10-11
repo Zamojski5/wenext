@@ -1,0 +1,444 @@
+#!/bin/sh
+# wenext: the launcher of the Wenext plugin for Codex and Claude Code.
+#
+#   bin/wenext mcp [--host codex|claude-code]   the MCP server the host agent starts (stdio)
+#   bin/wenext setup [PATH] [--project NAME]    remember where the checkout is, and the project
+#   bin/wenext projects                         list the projects of the local Wenext
+#   bin/wenext doctor                           check everything `mcp` needs, and say what is wrong
+#
+# WHAT `mcp` DOES. The Wenext stack runs in Docker on this machine and its control plane is not
+# published on any port, so the plugin does not talk HTTP: it `exec`s
+#
+#   docker compose -f <home>/docker-compose.yml -p wenext exec -T <-e flags> api \
+#       python -m control_plane.tools.plugin_server serve
+#
+# and that process (inside the `api` container, where the database is) chooses the project, finds
+# or opens its conversation, issues the session's capability and serves MCP on stdin and stdout.
+# `exec` means this script is gone by then: the host talks to docker directly, signals reach it,
+# and the exit code of the server is the exit code of this command (2 capability, 3 database,
+# 4 the project cannot be chosen, 5 configuration), passed through untouched. The launcher does
+# NOT choose the project itself: the server owns that rule, and a second copy here would be one
+# more place to disagree with it, and one more container call before the host's start-up timeout.
+#
+# STDOUT IS THE MCP CHANNEL. In `mcp` nothing may be printed there before the server is running,
+# so every message below goes to stderr. Just as important and easier to forget: no docker call
+# BEFORE the final `exec` may see the stdin of this script, which is the host's MCP stream
+# (`compose exec -T` attaches the stdin it is given, so an unguarded preflight call would swallow
+# the first frames of the protocol). Every such call goes through `run_limited`, which runs it in
+# the background with stdin from /dev/null; keep it that way when adding a call.
+#
+# WHICH CHECKOUT AND WHICH PROJECT come from the environment (WENEXT_HOME, WENEXT_PROJECT) and
+# then from ~/.wenext/config.json, never from anything a model can reach: the plugin is installed
+# as a COPY (a cache) and cannot find the checkout by looking around it. Only `setup` looks at
+# where this script sits, because only there it is run by a person from a checkout. The project
+# is never an argument of an MCP tool.
+#
+# WHICH AGENT is called the host, and it selects the tool profile on the server side. In order:
+# `--host`, then WENEXT_HOST, then claude-code when CLAUDE_PLUGIN_ROOT is set (Claude Code exports
+# it to the processes of a plugin's MCP servers), then codex.
+#
+# DASHBOARD. The launcher hands the server the address the PERSON's browser can open
+# (WENEXT_DASHBOARD_URL, from WENEXT_DASHBOARD_HOST_PORT or `.env`, default 3000, the same
+# variable docker-compose.yml publishes the dashboard port with), and the server prints the full
+# link to the conversation where the person approves drafts. It goes to stderr like everything
+# else here: hosts show an MCP server's stderr in their logs, not in the chat.
+#
+# LANGUAGE OF THE CARD. WENEXT_LANG (pl or en), then `lang` in ~/.wenext/config.json, is handed to
+# the server (`-e WENEXT_LANG=`), which puts it in the result of `room.show`; the card then speaks
+# that language. Empty means "decide by the host's locale": Polish for a Polish host, English for
+# every other (see `tools/apps_ui.py`). A Polish install that must stay Polish whatever its host
+# reports sets `bin/wenext setup --lang pl`. Not named LANG: that one is the shell's locale.
+#
+# Operator-facing messages are Polish (D-010). The launcher's own exit codes: 64 usage, 69 Docker
+# or the stack is not there, 78 configuration (checkout, .env, agent name).
+
+set -u
+
+PROG="wenext"
+CONFIG_FILE="${HOME:-}/.wenext/config.json"
+
+# A host started from the desktop (the ChatGPT app) does not always have /usr/local/bin on its
+# PATH, and that is where Docker Desktop puts `docker`. The usual places are searched AFTER the
+# PATH the host gave us. WENEXT_EXTRA_PATH replaces the list; set but empty, it turns this off.
+PATH="${PATH:-/usr/bin:/bin:/usr/sbin:/sbin}"
+EXTRA_PATH="${WENEXT_EXTRA_PATH-/usr/local/bin:/opt/homebrew/bin:/Applications/Docker.app/Contents/Resources/bin:${HOME:-}/.docker/bin}"
+[ -z "$EXTRA_PATH" ] || PATH="$PATH:$EXTRA_PATH"
+export PATH
+
+# How long each preflight step may take, in seconds. Overridable for tests and slow machines.
+# The worst case (5 + 10 + 25 + 10) fits the 60 s `startup_timeout_sec` of .codex-mcp.json, with
+# the server's own start left over; a healthy stack answers all of it in about a second.
+seconds_or() {
+  case "$1" in
+    '' | *[!0-9]*) printf '%s' "$2" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+INFO_SECONDS=$(seconds_or "${WENEXT_PREFLIGHT_INFO_SECONDS:-}" 5)
+STEP_SECONDS=$(seconds_or "${WENEXT_PREFLIGHT_STEP_SECONDS:-}" 10)
+HEALTH_SECONDS=$(seconds_or "${WENEXT_PREFLIGHT_HEALTH_SECONDS:-}" 25)
+
+TMP_DIR=""
+CHILD=""
+VERBOSE=0
+HOME_DIR=""
+PROJECT=""
+ORGANIZATION=""
+HOST=""
+LANG_CODE=""
+
+say() { printf '%s: %s\n' "$PROG" "$*" >&2; }
+cleanup() { [ -z "$TMP_DIR" ] || rm -rf "$TMP_DIR"; TMP_DIR=""; }
+die() { _code=$1; shift; say "$*"; cleanup; exit "$_code"; }
+abort() { [ -z "$CHILD" ] || kill "$CHILD" 2>/dev/null; cleanup; exit 143; }
+trap abort INT TERM HUP
+
+# ok MESSAGE: a line of progress, only for `doctor` (stdout is the MCP channel everywhere else).
+ok() { if [ "$VERBOSE" -eq 1 ]; then printf '%s\n' "$*"; fi; }
+
+usage() {
+  cat <<'EOF'
+Użycie:
+  wenext mcp [--host codex|claude-code]    serwer MCP dla agenta (uruchamia go agent, nie człowiek)
+  wenext setup [KATALOG] [--project NAZWA] [--organization ID] [--lang pl|en] zapisz, gdzie jest repozytorium Wenext i który projekt
+  wenext projects                          wypisz projekty lokalnego Wenext
+  wenext doctor                            sprawdź, czy wszystko, czego potrzebuje mcp, działa
+EOF
+}
+
+# ---------------------------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------------------------
+
+# json_value FILE KEY: the string value of KEY in a flat JSON object, or nothing. Reads what
+# `setup` writes and what a person edits by hand: one key per line or several, `\"` and `\\`
+# escapes. Not a JSON parser (no \uXXXX, no nesting), and it does not need to be: this file has
+# two keys, and no python3 is assumed, because on macOS the `python3` of a machine without the
+# developer tools is a stub that opens an installer window.
+json_value() {
+  [ -f "$1" ] || return 0
+  sed -En 's/.*"'"$2"'"[[:space:]]*:[[:space:]]*"(([^"\\]|\\.)*)".*/\1/p' "$1" | head -n 1 | sed -E 's|\\(["\\/])|\1|g'
+}
+
+# json_escape VALUE: VALUE as the inside of a JSON string. Control characters are refused by the
+# caller, so backslash and quote are all that is left to escape.
+json_escape() {
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
+has_control_chars() {
+  [ "$(printf '%s' "$1" | LC_ALL=C tr -d '[:cntrl:]')" != "$1" ]
+}
+
+expand_home() {
+  case "$1" in
+    "~") printf '%s' "${HOME:-}" ;;
+    "~/"*) printf '%s/%s' "${HOME:-}" "${1#"~/"}" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+# resolve_home: WENEXT_HOME, then the config. Sets HOME_DIR or dies. A relative path is made
+# absolute here, because the host starts this script in the plugin's directory, not the person's.
+resolve_home() {
+  _home="${WENEXT_HOME:-}"
+  [ -n "$_home" ] || _home=$(json_value "$CONFIG_FILE" home)
+  _home=$(expand_home "$_home")
+  if [ -n "$_home" ]; then
+    case "$_home" in
+      /*) ;;
+      *) _home=$(CDPATH='' cd -- "$_home" 2>/dev/null && pwd) || _home="" ;;
+    esac
+  fi
+  if [ -z "$_home" ] || [ ! -f "$_home/docker-compose.yml" ]; then
+    die 78 "Nie widzę repozytorium Wenext. Ustaw WENEXT_HOME na katalog z docker-compose.yml albo uruchom: bin/wenext setup"
+  fi
+  HOME_DIR=$_home
+}
+
+resolve_project() {
+  PROJECT="${WENEXT_PROJECT:-}"
+  [ -n "$PROJECT" ] || PROJECT=$(json_value "$CONFIG_FILE" project)
+  # Only needed when the database holds several organizations; the server refuses and says so.
+  ORGANIZATION="${WENEXT_ORGANIZATION:-}"
+  [ -n "$ORGANIZATION" ] || ORGANIZATION=$(json_value "$CONFIG_FILE" organization)
+}
+
+# resolve_lang: the language of the card, from WENEXT_LANG and then the config. Sets LANG_CODE to
+# pl, en or empty (empty: the card asks the host). Case and "_" or "-" suffixes do not matter
+# (pl, PL, pl_PL, en-GB). A value that is none of these is said on stderr and ignored: a typo
+# must not stop the agent from starting.
+resolve_lang() {
+  _lang="${WENEXT_LANG:-}"
+  [ -n "$_lang" ] || _lang=$(json_value "$CONFIG_FILE" lang)
+  _lang=$(printf '%s' "$_lang" | tr 'A-Z_' 'a-z-')
+  case "$_lang" in
+    '' | auto) LANG_CODE="" ;;
+    pl | pl-*) LANG_CODE=pl ;;
+    en | en-*) LANG_CODE=en ;;
+    *) say "Nieznany język karty '$_lang' (dozwolone: pl, en). Pomijam, karta wybierze język hosta."; LANG_CODE="" ;;
+  esac
+}
+
+resolve_host() {
+  HOST="${1:-}"
+  [ -n "$HOST" ] || HOST="${WENEXT_HOST:-}"
+  if [ -z "$HOST" ]; then
+    if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then HOST="claude-code"; else HOST="codex"; fi
+  fi
+  case "$HOST" in
+    codex | claude-code) ;;
+    *) die 78 "Nieznany agent '$HOST'. Dozwolone: codex, claude-code." ;;
+  esac
+}
+
+# The dashboard as the person's browser opens it: the port is the host side of the mapping in
+# docker-compose.yml (`${WENEXT_DASHBOARD_HOST_PORT:-3000}`), which the environment and then
+# `.env` may override. Anything that is not a number is the compose default.
+dashboard_url() {
+  _port="${WENEXT_DASHBOARD_HOST_PORT:-}"
+  if [ -z "$_port" ] && [ -f "$HOME_DIR/.env" ]; then
+    _port=$(sed -n 's/^WENEXT_DASHBOARD_HOST_PORT=[[:space:]"]*\([0-9][0-9]*\).*/\1/p' "$HOME_DIR/.env" | tail -n 1)
+  fi
+  case "$_port" in
+    '' | *[!0-9]*) _port=3000 ;;
+  esac
+  printf 'http://127.0.0.1:%s' "$_port"
+}
+
+# ---------------------------------------------------------------------------------------------
+# Docker, preflight
+# ---------------------------------------------------------------------------------------------
+
+# run_limited SECONDS OUTFILE COMMAND...: stdout to OUTFILE, stderr dropped, stdin /dev/null (see
+# the header), killed after SECONDS. A hung `docker info` is the real failure of a stopped Docker
+# Desktop, and macOS has no `timeout`. Returns the command's status, or 124 when it was killed.
+# COMMAND is an executable, never a shell function: a function runs in a subshell, and killing
+# that would leave the docker process behind.
+run_limited() {
+  _secs=$1
+  _out=$2
+  shift 2
+  rm -f "$_out.timeout"
+  "$@" >"$_out" 2>/dev/null </dev/null &
+  _pid=$!
+  CHILD=$_pid
+  (
+    sleep "$_secs" &
+    _sleeper=$!
+    trap 'kill "$_sleeper" 2>/dev/null; exit 0' TERM
+    wait "$_sleeper" || exit 0
+    : >"$_out.timeout"
+    kill "$_pid" 2>/dev/null || exit 0
+    sleep 1
+    kill -9 "$_pid" 2>/dev/null
+    exit 0
+  ) >/dev/null 2>&1 </dev/null &
+  _watch=$!
+  { wait "$_pid"; } 2>/dev/null
+  _status=$?
+  CHILD=""
+  kill "$_watch" 2>/dev/null
+  { wait "$_watch"; } 2>/dev/null
+  if [ -e "$_out.timeout" ]; then
+    return 124
+  fi
+  return "$_status"
+}
+
+# preflight: everything `mcp` needs from the machine, in the order a person would fix it. Dies
+# with the sentence that says what to do. Sets HOME_DIR.
+preflight() {
+  command -v docker >/dev/null 2>&1 || die 69 "Nie znaleziono polecenia docker. Zainstaluj Docker Desktop."
+  resolve_home
+  ok "OK  Repozytorium Wenext: $HOME_DIR"
+  [ -f "$HOME_DIR/.env" ] || die 78 "Brakuje pliku .env w $HOME_DIR. Uruchom tam: make env"
+  ok "OK  Plik .env jest"
+  # The credential helper of Docker Desktop hangs on this host (KONWENCJE, D-008), so the
+  # Makefile points Docker at a config without it, and so do we. The file is made by `make env`;
+  # a directory without it would also hide the compose plugin, so it is used only when it is
+  # there.
+  if [ -f "$HOME_DIR/infra/docker-config/config.json" ]; then
+    DOCKER_CONFIG="$HOME_DIR/infra/docker-config"
+    export DOCKER_CONFIG
+  fi
+  TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/wenext-launcher.XXXXXX") || die 69 "Nie mogę założyć katalogu tymczasowego."
+
+  run_limited "$INFO_SECONDS" "$TMP_DIR/info" docker info \
+    || die 69 "Docker nie odpowiada. Uruchom Docker Desktop i uruchom agenta ponownie."
+  ok "OK  Docker odpowiada"
+
+  run_limited "$STEP_SECONDS" "$TMP_DIR/ps" docker compose -f "$HOME_DIR/docker-compose.yml" -p wenext ps --status running -q api
+  _status=$?
+  [ "$_status" -eq 0 ] \
+    || die 69 "Nie udało się odczytać stanu Wenext przez docker compose (kod $_status). W katalogu $HOME_DIR sprawdź make ps."
+  API_ID=$(head -n 1 "$TMP_DIR/ps" 2>/dev/null)
+  [ -n "$API_ID" ] \
+    || die 69 "Wenext nie działa: kontener api jest zatrzymany. W katalogu $HOME_DIR uruchom make up-observe, poczekaj na stan healthy i uruchom agenta ponownie."
+
+  # Running is not ready: right after `make up-observe` the api answers nothing for a few
+  # seconds. The deadline is the clock, not a count of loops: one `docker inspect` may itself
+  # take its whole limit.
+  _started=$(date +%s)
+  _state=""
+  while :; do
+    run_limited "$STEP_SECONDS" "$TMP_DIR/health" docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$API_ID"
+    _state=$(head -n 1 "$TMP_DIR/health" 2>/dev/null)
+    case "$_state" in
+      healthy | none | unhealthy) break ;;
+    esac
+    [ $(($(date +%s) - _started)) -ge "$HEALTH_SECONDS" ] && break
+    sleep 1
+  done
+  case "$_state" in
+    healthy | none) ;;
+    *) die 69 "Wenext nie działa: kontener api nie jest zdrowy (stan: ${_state:-nieznany}). W katalogu $HOME_DIR sprawdź make ps oraz make logs S=api i uruchom agenta ponownie." ;;
+  esac
+  ok "OK  Kontener api działa i jest zdrowy"
+}
+
+# ---------------------------------------------------------------------------------------------
+# Subcommands
+# ---------------------------------------------------------------------------------------------
+
+cmd_mcp() {
+  _host_flag=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --host) [ $# -ge 2 ] || die 64 "Brakuje wartości po --host."; _host_flag=$2; shift 2 ;;
+      --host=*) _host_flag=${1#--host=}; shift ;;
+      *) die 64 "Nieznany argument: $1" ;;
+    esac
+  done
+  resolve_host "$_host_flag"
+  preflight
+  resolve_project
+  resolve_lang
+  _home=$HOME_DIR
+  _dashboard=$(dashboard_url)
+  cleanup
+  # The one call that keeps stdin: the host's MCP stream goes straight to the server. Every value
+  # is passed explicitly (-e NAME=value), empty ones too (the server reads empty as "not set"),
+  # so nothing depends on how this compose resolves a bare `-e NAME` from the environment.
+  exec docker compose -f "$_home/docker-compose.yml" -p wenext exec -T \
+    -e "WENEXT_PROJECT=$PROJECT" \
+    -e "WENEXT_ORGANIZATION=$ORGANIZATION" \
+    -e "WENEXT_HOST=$HOST" \
+    -e "WENEXT_PLUGIN_TTL_HOURS=${WENEXT_PLUGIN_TTL_HOURS:-}" \
+    -e "WENEXT_DASHBOARD_URL=$_dashboard" \
+    -e "WENEXT_LANG=$LANG_CODE" \
+    api python -m control_plane.tools.plugin_server serve
+}
+
+cmd_projects() {
+  [ $# -eq 0 ] || die 64 "Polecenie projects nie przyjmuje argumentów."
+  preflight
+  resolve_project
+  _home=$HOME_DIR
+  cleanup
+  exec docker compose -f "$_home/docker-compose.yml" -p wenext exec -T \
+    -e "WENEXT_ORGANIZATION=$ORGANIZATION" \
+    api python -m control_plane.tools.plugin_server projects </dev/null
+}
+
+cmd_doctor() {
+  [ $# -eq 0 ] || die 64 "Polecenie doctor nie przyjmuje argumentów."
+  VERBOSE=1
+  resolve_host ""
+  preflight
+  resolve_project
+  resolve_lang
+  printf 'Agent: %s\n' "$HOST"
+  printf 'Projekt: %s\n' "${PROJECT:-(nie wybrano; serwer użyje jedynego projektu)}"
+  printf 'Organizacja: %s\n' "${ORGANIZATION:-(nie wybrano; serwer użyje jedynej organizacji)}"
+  printf 'Dashboard: %s\n' "$(dashboard_url)"
+  printf 'Język karty: %s\n' "${LANG_CODE:-(nie wybrano; karta użyje języka hosta)}"
+  cleanup
+}
+
+cmd_setup() {
+  _path_arg=""
+  _project=""
+  _organization=""
+  _lang_arg=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --project) [ $# -ge 2 ] || die 64 "Brakuje wartości po --project."; _project=$2; shift 2 ;;
+      --project=*) _project=${1#--project=}; shift ;;
+      --organization) [ $# -ge 2 ] || die 64 "Brakuje wartości po --organization."; _organization=$2; shift 2 ;;
+      --organization=*) _organization=${1#--organization=}; shift ;;
+      --lang) [ $# -ge 2 ] || die 64 "Brakuje wartości po --lang."; _lang_arg=$2; shift 2 ;;
+      --lang=*) _lang_arg=${1#--lang=}; shift ;;
+      -*) die 64 "Nieznany argument: $1" ;;
+      *)
+        [ -z "$_path_arg" ] || die 64 "Podano dwa katalogi. Użycie: wenext setup [KATALOG] [--project NAZWA]"
+        _path_arg=$1
+        shift
+        ;;
+    esac
+  done
+  [ -n "${HOME:-}" ] || die 78 "Brak zmiennej HOME, więc nie wiem, gdzie zapisać $PROG/config.json."
+
+  # Where the checkout is: the argument; else the repository this script sits in (plugins/wenext/bin
+  # inside a checkout), which is the person running it from a clone; else the current directory.
+  # A cache copy of the plugin has no checkout around it, so it falls through to the last.
+  _dir="$_path_arg"
+  if [ -z "$_dir" ]; then
+    _here=$(CDPATH='' cd -- "$(dirname -- "$0")/../../.." 2>/dev/null && pwd -P)
+    if [ -n "$_here" ] && [ -f "$_here/docker-compose.yml" ]; then _dir=$_here; else _dir=$(pwd -P); fi
+  fi
+  _dir=$(expand_home "$_dir")
+  if [ ! -f "$_dir/docker-compose.yml" ]; then
+    die 78 "W katalogu $_dir nie ma pliku docker-compose.yml. Podaj katalog repozytorium Wenext: bin/wenext setup /ścieżka/do/wenext"
+  fi
+  _dir=$(CDPATH='' cd -- "$_dir" && pwd -P)
+  [ -n "$_project" ] || _project="${WENEXT_PROJECT:-}"
+  [ -n "$_organization" ] || _organization="${WENEXT_ORGANIZATION:-}"
+  # The language is the one setting `setup` keeps when it is run again without it: a Polish install
+  # must not turn English because someone re-ran `setup` for another reason.
+  [ -n "$_lang_arg" ] || _lang_arg="${WENEXT_LANG:-}"
+  [ -n "$_lang_arg" ] || _lang_arg=$(json_value "$CONFIG_FILE" lang)
+  _lang=$(printf '%s' "$_lang_arg" | tr 'A-Z_' 'a-z-')
+  case "$_lang" in
+    '' | auto) _lang="" ;;
+    pl | pl-*) _lang=pl ;;
+    en | en-*) _lang=en ;;
+    *) die 64 "Nieznany język '$_lang_arg'. Dozwolone: pl, en." ;;
+  esac
+
+  for _value in "$_dir" "$_project" "$_organization"; do
+    if has_control_chars "$_value"; then
+      die 78 "Wartość zawiera znak sterujący (nowa linia, tabulator), a config.json go nie obsługuje."
+    fi
+  done
+
+  mkdir -p "$(dirname "$CONFIG_FILE")" || die 78 "Nie mogę założyć katalogu $(dirname "$CONFIG_FILE")."
+  _tmp="$CONFIG_FILE.tmp.$$"
+  (
+    umask 077
+    {
+      printf '{\n  "home": "%s"' "$(json_escape "$_dir")"
+      [ -z "$_project" ] || printf ',\n  "project": "%s"' "$(json_escape "$_project")"
+      [ -z "$_organization" ] || printf ',\n  "organization": "%s"' "$(json_escape "$_organization")"
+      [ -z "$_lang" ] || printf ',\n  "lang": "%s"' "$_lang"
+      printf '\n}\n'
+    } >"$_tmp"
+  ) || die 78 "Nie mogę zapisać $CONFIG_FILE."
+  mv "$_tmp" "$CONFIG_FILE" || die 78 "Nie mogę zapisać $CONFIG_FILE."
+  printf 'Zapisano %s\n  home: %s\n  project: %s\n  lang: %s\n' "$CONFIG_FILE" "$_dir" "${_project:-(nie wybrano; serwer użyje jedynego projektu)}" "${_lang:-(nie wybrano; karta użyje języka hosta)}"
+  printf 'Sprawdź, czy wszystko działa: %s doctor\n' "$0"
+}
+
+# ---------------------------------------------------------------------------------------------
+
+[ $# -ge 1 ] || { usage >&2; exit 64; }
+_command=$1
+shift
+case "$_command" in
+  mcp) cmd_mcp "$@" ;;
+  setup) cmd_setup "$@" ;;
+  projects) cmd_projects "$@" ;;
+  doctor) cmd_doctor "$@" ;;
+  help | --help | -h) usage ;;
+  *) say "Nieznane polecenie: $_command"; usage >&2; exit 64 ;;
+esac

@@ -1,0 +1,10 @@
+{
+  "_recording": "synthetic answer written by an agent for the offline runner; not a model output and not the operator's judgment",
+  "decision": "SHORT_ACK",
+  "draft": "glad it worked. watch the redelivery counter for a day, it tends to creep back when traffic doubles.",
+  "target_message_id": "m3",
+  "contribution": null,
+  "brief_rationale": "The person thanked the account and reported success; the exchange is over. A one-line acknowledgement fits the profile's habit of a short reply to someone already talking to the account.",
+  "sources_used": [],
+  "confidence": 0.8
+}

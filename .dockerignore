@@ -1,0 +1,13 @@
+.git
+.venv
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+artifacts/
+var/
+data/
+profiles/
+codex-home/
+*.log
+ROADMAP_CODEX_CDP_COMMUNITY_OS.v3-backup.md

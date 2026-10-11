@@ -1,0 +1,16 @@
+{
+  "name": "wenext-cloud",
+  "version": "0.1.0",
+  "description": "Finds the first users for what you built. Reads your code, finds people on Reddit who are describing the problem it solves right now and drafts replies in your voice. Runs in the cloud, nothing to install; you post each reply yourself.",
+  "author": {
+    "name": "Wenext"
+  },
+  "repository": "https://github.com/Zamojski5/wenext",
+  "keywords": [
+    "marketing",
+    "reddit",
+    "community",
+    "founders",
+    "distribution"
+  ]
+}

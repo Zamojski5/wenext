@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "wenext": {
+      "cwd": ".",
+      "command": "./bin/wenext",
+      "args": [
+        "mcp"
+      ],
+      "env_vars": [
+        "PATH",
+        "HOME",
+        "WENEXT_HOME",
+        "WENEXT_PROJECT",
+        "WENEXT_ORGANIZATION",
+        "WENEXT_HOST",
+        "WENEXT_PLUGIN_TTL_HOURS",
+        "WENEXT_DASHBOARD_HOST_PORT",
+        "WENEXT_LANG"
+      ],
+      "startup_timeout_sec": 60,
+      "tool_timeout_sec": 120
+    }
+  }
+}

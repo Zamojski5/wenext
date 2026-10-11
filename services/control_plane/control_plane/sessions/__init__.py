@@ -1,0 +1,62 @@
+"""Agent sessions (P2): a goal, one engine thread resumed across turns, an append-only trace.
+
+The unit of work is a SESSION, not a single model call. `store.py` owns migration 0015,
+`client.py` speaks the app-server protocol, `handlers.py` is the job that runs one turn, and
+`tools/` (a sibling package) is the MCP server through which the model reaches the product.
+"""
+
+from .store import (
+    EVENT_ASSISTANT_MESSAGE,
+    EVENT_ERROR,
+    EVENT_INTERRUPT,
+    EVENT_KINDS,
+    EVENT_STATUS,
+    EVENT_TOOL_CALL,
+    EVENT_TOOL_RESULT,
+    EVENT_USER_MESSAGE,
+    HOST_BUDGET_KEY,
+    SESSION_KINDS,
+    SESSION_STATUSES,
+    STATUS_BUDGET_EXHAUSTED,
+    STATUS_DONE,
+    STATUS_FAILED,
+    STATUS_PAUSED,
+    STATUS_QUEUED,
+    STATUS_RUNNING,
+    STATUS_WAITING_EVENT,
+    STATUS_WAITING_USER,
+    TERMINAL_STATUSES,
+    EventRow,
+    SessionRefusal,
+    SessionRow,
+    SessionStore,
+    host_of,
+)
+
+__all__ = [
+    "EVENT_ASSISTANT_MESSAGE",
+    "EVENT_ERROR",
+    "EVENT_INTERRUPT",
+    "EVENT_KINDS",
+    "EVENT_STATUS",
+    "EVENT_TOOL_CALL",
+    "EVENT_TOOL_RESULT",
+    "EVENT_USER_MESSAGE",
+    "HOST_BUDGET_KEY",
+    "SESSION_KINDS",
+    "SESSION_STATUSES",
+    "STATUS_BUDGET_EXHAUSTED",
+    "STATUS_DONE",
+    "STATUS_FAILED",
+    "STATUS_PAUSED",
+    "STATUS_QUEUED",
+    "STATUS_RUNNING",
+    "STATUS_WAITING_EVENT",
+    "STATUS_WAITING_USER",
+    "TERMINAL_STATUSES",
+    "EventRow",
+    "SessionRefusal",
+    "SessionRow",
+    "SessionStore",
+    "host_of",
+]

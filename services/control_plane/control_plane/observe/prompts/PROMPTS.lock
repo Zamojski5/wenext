@@ -1,0 +1,9 @@
+# Zamrożone hasze promptów modułu observe. Regeneracja:
+#   python -m control_plane.observe.prompts
+# Zmiana promptu bez odświeżenia tego pliku zatrzymuje suitę
+# (tests/test_observe_prompts.py).
+community_picture ad00cc946a7eb93ec4fa142e67420e5ee09de26f7df84ce5a887579f3541a3b9
+community_voice 033c6251caf219fc1e3c84e4b69e81348ef9af6388e2f7b90098993a8d43f4b7
+draft_judge fa1f51a9f21cc4f8e196a747dca5c6d5559c7d8578bbd82d6443710b5611e075
+judge_thread bf68dd819e0fded985e4c00d738ecf3bc428ea98e44003a3afdf41f6296deeb4
+reaction_baseline ef86e12fd2d0cf403e97df45c8a691b4fa0a2add3889fbfa9d3ff88548e2a0fc
