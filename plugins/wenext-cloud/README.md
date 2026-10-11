@@ -50,7 +50,7 @@ services/control_plane/.venv/bin/python plugins/wenext-cloud/build.py          #
 services/control_plane/.venv/bin/python plugins/wenext-cloud/build.py --check  # exit 1 if stale
 ```
 
-The address of the server is `https://getwenext.com/mcp`: `DOMAIN` and `MCP_PATH` in `build.py`,
+The address of the server is `https://mcp.getwenext.com/mcp`: `DOMAIN` and `MCP_PATH` in `build.py`,
 the only two places that know it. The path is provisional until the server side confirms it; change
 it there, run the script, commit the result. `.mcp.json` carries the URL and nothing else: the
 sign-in (GitHub, through the edge) is done by the host the first time a tool is called.

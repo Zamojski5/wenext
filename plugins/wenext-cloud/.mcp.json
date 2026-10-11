@@ -2,7 +2,7 @@
   "mcpServers": {
     "wenext": {
       "type": "http",
-      "url": "https://getwenext.com/mcp"
+      "url": "https://mcp.getwenext.com/mcp"
     }
   }
 }

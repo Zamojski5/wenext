@@ -42,7 +42,7 @@ from control_plane.tools.catalog import HOSTED_REPLY, HOSTED_RULES, HOSTED_WORKF
 #: endpoint. The domain is the founder's (`getwenext.com`); the path is provisional until the server
 #: side confirms it (`/mcp`). Sign-in is OAuth done by the host when the first tool is called, so
 #: the file carries the URL and nothing else: no `oauth` block, no key.
-DOMAIN = "getwenext.com"
+DOMAIN = "mcp.getwenext.com"
 MCP_PATH = "/mcp"
 SERVER_NAME = "wenext"
 

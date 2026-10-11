@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "description": "Finds the first users for what you built. Reads your code, finds people on Reddit who are describing the problem it solves right now and drafts replies in your voice. Runs in the cloud, nothing to install; you post each reply yourself.",
   "author": {
-    "name": "Wenext"
+    "name": "Wenext",
+    "url": "https://getwenext.com"
   },
   "repository": "https://github.com/Zamojski5/wenext",
   "keywords": [
@@ -12,5 +13,7 @@
     "community",
     "founders",
     "distribution"
-  ]
+  ],
+  "license": "MIT",
+  "homepage": "https://getwenext.com"
 }
