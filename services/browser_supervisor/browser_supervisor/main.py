@@ -11,11 +11,15 @@ The `--contract` mode is what `make gonogo` calls for gate no. 1.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import signal
 import sys
+import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from community_os_contracts import CapsuleMode
 
@@ -29,6 +33,12 @@ from .reader import (
     reader_environment,
 )
 from .supervisor import BrowserSupervisor
+from .watchdog import EXIT_CODE_HUNG, HangWatchdog
+
+#: How long the tidying before a self-inflicted exit may take. The browser is already dead by then,
+#: so `supervisor.stop()` has nothing to close gracefully and finishes in a second or two; the
+#: deadline is for the day it does not.
+HEAL_CLEANUP_S = 15.0
 
 
 def _read_expected_build(lock_path: Path) -> str:
@@ -46,6 +56,52 @@ def build_supervisor() -> BrowserSupervisor:
         cdp_host=os.environ.get("WENEXT_CDP_HOST", "127.0.0.1"),
         vnc_socket=Path(vnc) if vnc else None,
     )
+
+
+def heal_and_exit(
+    supervisor: BrowserSupervisor,
+    reason: str,
+    *,
+    exit_fn: Callable[[int], Any] = os._exit,
+    cleanup_s: float = HEAL_CLEANUP_S,
+) -> None:
+    """The capsule's browser hung: kill it, tidy within a deadline, exit so compose restarts us.
+
+    The order matters. Killing Chrome FIRST is what unblocks the reader's thread when it waits in
+    a call to the browser (the usual shape of the hang), so everything after it can finish.
+    `reader.stop()` is deliberately not called: it waits for the serving thread, which is the very
+    thing that may be stuck. `supervisor.stop()` runs on a helper thread with a deadline, for the
+    same reason, and the exit is `os._exit`, because a normal interpreter exit joins threads and
+    can hang on the one we are leaving. Exit code `EXIT_CODE_HUNG`: the log says which of the three
+    ways to end this capsule it was.
+    """
+    print(
+        f"strażnik kapsuły: {reason}. Zabijam przeglądarkę i kończę proces z kodem "
+        f"{EXIT_CODE_HUNG}, compose uruchomi kapsułę od nowa na tym samym profilu",
+        file=sys.stderr,
+        flush=True,
+    )
+    running = supervisor.current
+    if running is not None:
+        tail = running.stderr_tail
+        if tail is not None and tail.bytes_seen:
+            print(
+                f"strażnik kapsuły: stderr przeglądarki ({tail.bytes_seen} B), koniec: "
+                f"{tail.tail(400)!r}",
+                file=sys.stderr,
+                flush=True,
+            )
+        with contextlib.suppress(Exception):
+            supervisor.kill_hard(running.process)
+
+    def tidy() -> None:
+        with contextlib.suppress(Exception):
+            supervisor.stop()
+
+    helper = threading.Thread(target=tidy, name="wenext-heal-cleanup", daemon=True)
+    helper.start()
+    helper.join(cleanup_s)
+    exit_fn(EXIT_CODE_HUNG)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -261,6 +317,7 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGINT, handle_signal)
 
     exit_code = 0
+    watchdog = HangWatchdog()
     while not stop_requested:
         # `supervisor.current`, not the `capsule` from before the loop: a mode switch replaces
         # the process, and the old handle would report a healthy capsule as dead (or vice versa).
@@ -287,7 +344,26 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             kod = running.process.returncode
             print(f"Proces Chrome zakończył się z kodem {kod}", file=sys.stderr, flush=True)
+            if running.stderr_tail is not None:
+                running.stderr_tail.join(1.0)
+                print(
+                    f"stderr Chrome, koniec: {running.stderr_tail.tail(800)!r}",
+                    file=sys.stderr,
+                    flush=True,
+                )
             exit_code = 1
+            break
+        # A browser that is alive and answers nothing never reaches the branches above; the
+        # watchdog is what ends such a capsule (see `watchdog.py`). Out of a launch for a person
+        # (no endpoint by design) and out of a mode switch it keeps away.
+        verdict = watchdog.poll_running(
+            running,
+            switching=controller.switching,
+            busy_for=reader.busy_for if reader is not None else (lambda: None),
+        )
+        if verdict is not None:
+            heal_and_exit(supervisor, verdict)
+            exit_code = EXIT_CODE_HUNG  # only reached when the exit function returns (tests)
             break
         time.sleep(1.0)
 

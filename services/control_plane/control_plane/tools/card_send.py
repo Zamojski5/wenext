@@ -65,6 +65,7 @@ from uuid import UUID
 
 from control_plane.opportunities.store import OpportunityStore, presence_path
 from control_plane.pilot.publication import ConsentError
+from control_plane.pilot.send_checks import reason_code
 from control_plane.presence.approval import ACTION_OF_CAPABILITY, ACTION_OWN_POST
 from control_plane.presence.card_consent import (
     CONSENT_WIDEN,
@@ -99,7 +100,17 @@ MAX_OUTSTANDING = 16
 META_TOKEN = "wenext/potwierdzenie"
 
 #: Tool arguments that must never be written to the trace: tool name to argument names.
-SECRET_ARGS: dict[str, tuple[str, ...]] = {"room.send_draft": ("token",)}
+SECRET_ARGS: dict[str, tuple[str, ...]] = {
+    "room.send_draft": ("token",),
+    # The card's acts on the scope (`tools/card_actions.py`): the same one-time confirmation.
+    "room.pause": ("token",),
+    "room.resume": ("token",),
+    "room.sign_scope": ("token",),
+    # Opening the agent's browser for a sign-in (`tools/card_connect.py`): the same confirmation.
+    "room.connect_account": ("token",),
+    # Sending a whole reviewed batch (`tools/card_batch.py`): the same one-time confirmation.
+    "room.send_batch": ("token",),
+}
 
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 
@@ -268,7 +279,9 @@ CARD_SEND_TOOL_SPECS = (
         "detail": (
             "Narzędzie dla karty Pokoju w agencie, niewidoczne dla modelu (visibility: app). "
             "Czyta wniosek tego projektu z kolejki publikatora: status, adres opublikowanej "
-            "odpowiedzi (dopiero po odczycie zwrotnym) i powód, gdy nie wyszło."
+            "odpowiedzi (dopiero po odczycie zwrotnym), termin najwcześniejszej próby "
+            "(`najwczesniej`, dla wniosku z paczki) i powód, gdy nie wyszło albo wniosek czeka "
+            "(`powod`, a w `powod_kod` jego stały kod)."
         ),
         "state": "DOSTEPNE",
         "input_schema": {
@@ -522,7 +535,7 @@ class CardSendTools:
             row = await conn.fetchrow(
                 """
                 SELECT q.id, q.status, q.detail, q.published_at, q.public_visibility,
-                       e.permalink, q.target_url
+                       e.permalink, q.target_url, q.not_before
                   FROM publication_requests q
                   LEFT JOIN execution_evidence e
                     ON e.attempt_id = q.attempt_id AND e.organization_id = q.organization_id
@@ -542,8 +555,14 @@ class CardSendTools:
                 "status": row["status"],
                 "widocznosc": row["public_visibility"],
                 "opublikowano": row["published_at"].isoformat() if row["published_at"] else None,
+                # v11: the moment before which the publisher will not take it (a batch is spaced
+                # out with it, `presence/batch_plan.py`), or null for "as soon as it can".
+                "najwczesniej": row["not_before"].isoformat() if row["not_before"] else None,
                 # Only a PUBLISHED request has evidence; before that there is no live address.
                 "adres": row["permalink"] if row["status"] == "PUBLISHED" else None,
                 "powod": row["detail"],
+                # v11: a stable code for the publisher's sentence (`pilot/send_checks.py`), so the
+                # card can word it in its own language; null for a sentence it does not know.
+                "powod_kod": reason_code(row["detail"]),
             }
         )

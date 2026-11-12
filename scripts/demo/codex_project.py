@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Point ONE Codex project (the tallymark folder) at the Wenext demo sandbox, in English.
+"""Point ONE project folder (the tallymark folder) at the Wenext demo sandbox, in English.
 
-    python scripts/demo/codex_project.py --repo ~/Dev/demo/tallymark          write the files
-    python scripts/demo/codex_project.py --repo ~/Dev/demo/tallymark --print  show them, write nothing
+    python scripts/demo/codex_project.py --repo ~/Dev/demo/tallymark                     Codex
+    python scripts/demo/codex_project.py --repo ~/Dev/demo/tallymark --host claude-code  Claude Code
+    python scripts/demo/codex_project.py --repo ~/Dev/demo/tallymark --host both         both
+    python scripts/demo/codex_project.py --repo ~/Dev/demo/tallymark --print             show only
 
 WHY A PROJECT FILE AND NOT AN ENVIRONMENT VARIABLE. The plugin's MCP server is started by Codex
 once per chat, in the plugin's own directory, and its environment is the one Codex was started with
@@ -27,6 +29,32 @@ holds instead of searching, so the film does not wait on a model deciding how to
 Needs, once, by hand: the folder opened as a Codex project and TRUSTED. An untrusted project's
 `.codex/config.toml` is ignored (measured), and Codex then runs the global plugin against the real
 project.
+
+CLAUDE CODE (`--host claude-code`). The same idea with Claude Code's own project layer:
+`<project>/.claude/settings.local.json` (a file Claude Code keeps out of git by itself) carries an
+`env` block, and that environment reaches the plugin's MCP server started in that folder
+(measured with Claude Code 2.1.296, 12.10: a `WENEXT_PROJECT` set there showed up in the server's
+environment; the launcher reads `WENEXT_*` before `~/.wenext/config.json`, so the founder's
+Polish card and real project are not touched anywhere else). `permissions.deny` takes the tools
+that read a platform or the web (`mcp__plugin_wenext_wenext__<tool with dots as underscores>`,
+and Claude Code's own `WebSearch` and `WebFetch`), and `permissions.allow` the four tools the
+film uses so the take does not stop on a permission prompt (measured in `claude -p`, 12.10: an
+`allow` rule ran the tool, no rule was refused, a `deny` rule removed the tool from the
+session):
+two reads (`room.show`, `opportunities.list`) and two writes that only touch sandbox rows
+(`draft.create`, `opportunities.mark`). NOTHING that sends or signs is ever allowed, here or
+anywhere: the send is the click on the card or on the Wenext page. `CLAUDE.md` plays the part
+of `AGENTS.md`.
+
+Launch it once from that folder, with the mod for this session only (nothing is installed):
+
+    cd ~/Dev/demo/tallymark && claude --plugin-dir <checkout>/plugins/wenext
+
+then type `/wenext`. Choose Trust when Claude Code asks about the folder: project settings are
+applied for a trusted folder.
+
+The sandbox flag (`demo: true` in `room.show`, which turns on the rehearsed Send in the mod) comes
+from the server, so the `api` container has to run an image that knows `control_plane.demo`.
 """
 
 from __future__ import annotations
@@ -80,6 +108,36 @@ Never say anything was posted: the card says so when it was.
 """
 
 EXCLUDES = (".codex/", "AGENTS.md")
+CLAUDE_EXCLUDES = (".claude/settings.local.json", "CLAUDE.md")
+
+#: Claude Code spells a tool `mcp__plugin_<plugin>_<server>__<tool>` and turns a dot into an
+#: underscore (measured). The plugin and its server are both called `wenext`.
+CLAUDE_TOOL_PREFIX = "mcp__plugin_wenext_wenext__"
+
+#: What the take may call without stopping on a prompt. Reads, and two writes that touch sandbox
+#: rows only. A test fails if anything that sends, signs, approves or connects an account is added.
+CLAUDE_ALLOWED_TOOLS = ("room.show", "opportunities.list", "draft.create", "opportunities.mark")
+
+CLAUDE_MD = """\
+# Demo sandbox for Wenext
+
+This folder is a sandbox for a Wenext demo. The Wenext project "tallymark" already holds a few
+fictional conversations, each with a drafted reply. Searching Reddit, X and the web is switched
+off on purpose.
+
+When the user types /wenext, or asks to see the room: call `room.show` at once and nothing else. The
+Wenext pane draws the people. Answer in one line (how many people, the best one) and say that
+Send is their click in the pane.
+
+When the user asks you to find their first users, or anything close to it:
+
+1. Read README.md and `git log --oneline -n 8`, nothing else in the repo.
+2. Say in one line who tallymark is for and what pain it removes.
+3. Call `opportunities.list` once, then `room.show`, then the same one line as above.
+
+Do not search the web, Reddit or X, do not open a browser, and do not write new drafts yourself.
+Never send or publish anything, and never say anything was posted: the pane says so when it was.
+"""
 
 
 def _toml_string(value: str) -> str:
@@ -116,15 +174,38 @@ def render_config(*, launcher: Path = LAUNCHER, home: Path = REPO_ROOT) -> str:
     )
 
 
-def _exclude(repo: Path) -> list[str]:
-    """Keep both files out of `git status` without touching the repo's history or .gitignore."""
+def claude_tool(name: str) -> str:
+    """Claude Code's name for a tool: `room.show` -> `mcp__plugin_wenext_wenext__room_show`."""
+    return CLAUDE_TOOL_PREFIX + name.replace(".", "_")
+
+
+def render_claude_settings(*, home: Path = REPO_ROOT) -> str:
+    """The project's `.claude/settings.local.json`: sandbox, English, no live search."""
+    settings = {
+        "env": {
+            "WENEXT_HOME": str(home),
+            "WENEXT_PROJECT": DEMO_PROJECT,
+            "WENEXT_ORGANIZATION": DEMO_ORGANIZATION,
+            "WENEXT_LANG": "en",
+            "WENEXT_HOST": "claude-code",
+        },
+        "permissions": {
+            "allow": [claude_tool(name) for name in CLAUDE_ALLOWED_TOOLS],
+            "deny": [claude_tool(name) for name in DISABLED_TOOLS] + ["WebSearch", "WebFetch"],
+        },
+    }
+    return json.dumps(settings, indent=2) + "\n"
+
+
+def _exclude(repo: Path, entries: tuple[str, ...] = EXCLUDES) -> list[str]:
+    """Keep the written files out of `git status` without touching history or .gitignore."""
     info = repo / ".git" / "info"
     if not info.is_dir():
         return []
     path = info / "exclude"
     current = path.read_text(encoding="utf-8") if path.exists() else ""
     have = {line.strip() for line in current.splitlines()}
-    added = [entry for entry in EXCLUDES if entry not in have]
+    added = [entry for entry in entries if entry not in have]
     if added:
         path.write_text(current + ("" if current.endswith("\n") or not current else "\n") + "\n".join(added) + "\n", encoding="utf-8")
     return added
@@ -149,19 +230,60 @@ def write(repo: Path) -> list[str]:
     return done
 
 
+def write_claude(repo: Path) -> list[str]:
+    """The Claude Code half: `.claude/settings.local.json` and `CLAUDE.md`."""
+    if not repo.is_dir():
+        raise SystemExit(f"codex_project: {repo} is not a folder")
+    if not LAUNCHER.is_file():
+        raise SystemExit(f"codex_project: no launcher at {LAUNCHER}")
+    done: list[str] = []
+    (repo / ".claude").mkdir(exist_ok=True)
+    settings = repo / ".claude" / "settings.local.json"
+    settings.write_text(render_claude_settings(), encoding="utf-8")
+    done.append(f"wrote {settings}")
+    notes = repo / "CLAUDE.md"
+    notes.write_text(CLAUDE_MD, encoding="utf-8")
+    done.append(f"wrote {notes}")
+    added = _exclude(repo, CLAUDE_EXCLUDES)
+    if added:
+        done.append("added to .git/info/exclude: " + ", ".join(added))
+    return done
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--repo", required=True, type=Path, help="the tallymark folder")
+    parser.add_argument(
+        "--host",
+        choices=("codex", "claude-code", "both"),
+        default="codex",
+        help="which agent's project layer to write (default: codex)",
+    )
     parser.add_argument("--print", action="store_true", dest="show", help="print, write nothing")
     arguments = parser.parse_args(argv)
+    codex = arguments.host in ("codex", "both")
+    claude = arguments.host in ("claude-code", "both")
     if arguments.show:
-        print(render_config())
-        print("--- AGENTS.md ---")
-        print(AGENTS_MD)
+        if codex:
+            print(render_config())
+            print("--- AGENTS.md ---")
+            print(AGENTS_MD)
+        if claude:
+            print("--- .claude/settings.local.json ---")
+            print(render_claude_settings())
+            print("--- CLAUDE.md ---")
+            print(CLAUDE_MD)
         return 0
-    for line in write(arguments.repo.expanduser().resolve()):
-        print(line)
-    print("Next, once: open the folder in Codex as a project and choose Trust.")
+    repo = arguments.repo.expanduser().resolve()
+    if codex:
+        for line in write(repo):
+            print(line)
+        print("Next, once: open the folder in Codex as a project and choose Trust.")
+    if claude:
+        for line in write_claude(repo):
+            print(line)
+        mod = REPO_ROOT / "plugins" / "wenext"
+        print(f"Next: cd {repo} && claude --plugin-dir {mod}   then type /wenext")
     return 0
 
 

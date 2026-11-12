@@ -285,7 +285,14 @@ class DelegatedApprover:
             # nie dotyczy, a post ma zostać zatrzymany także wtedy, gdy ogólny limit
             # publikacji jest jeszcze daleki.
             own_post = ACTION_OF_CAPABILITY.get(str(row["action_type"])) == ACTION_OWN_POST
-            blocked = spent.own_post_blocked() if own_post else spent.publication_blocked()
+            # PER ACCOUNT (v11): the account's own rules first, then the overall ceiling; with one
+            # shared bucket signed (every scope before v11) the account changes nothing.
+            account_id = row["social_account_id"]
+            blocked = (
+                spent.own_post_blocked(account_id)
+                if own_post
+                else spent.publication_blocked(account_id)
+            )
             if blocked is not None:
                 return Considered(revision_id, REFUSED, f"budżet wyczerpany, {blocked}")
             reason = (

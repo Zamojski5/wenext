@@ -34,6 +34,7 @@ and the exact X status shape are the only addresses accepted.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -42,6 +43,9 @@ from urllib.parse import urlsplit
 from uuid import UUID
 
 import asyncpg
+
+from .avatars import safe_avatar, safe_picture
+from .ranking import Metrics, is_trending
 
 STATUS_NEW = "NOWA"
 STATUS_DRAFT = "SZKIC"
@@ -62,6 +66,16 @@ TITLE_CHARS = 300
 EXCERPT_CHARS = 1500
 REASON_CHARS = 600
 AUTHOR_CHARS = 100
+#: The `reason` of an opportunity the system recorded by itself (`target_context.py`: a reply draft
+#: aimed at a conversation nobody marked, 13.10). A reason is "why this conversation is worth the
+#: founder's attention" and the system has none to give, so the page shows none: `to_json` says
+#: `dlaczego: ""` for it, and the card draws no "Why?" for an empty one.
+AUTO_REASON = "auto: szkic odpowiedzi bez zaznaczonej okazji"
+#: Who "dismisses" a post that was only READ for context (v11, 13.10: the post a draft QUOTES). It
+#: is not a conversation anybody should answer, so its row is born dismissed by this, never listed
+#: under "Skipped" and never counted in it (`room.skipped_view` leaves it out), and it exists only
+#: so the card can draw the quoted post inside the draft that quotes it.
+CONTEXT_DISMISSER = "system:CYTAT"
 #: How many of a project's opportunities one read looks at. A project that marked more than this
 #: has a list nobody reads; the newest are the ones that can still be answered.
 SCAN_LIMIT = 500
@@ -214,6 +228,17 @@ class NewOpportunity:
     score: int | None = None
     num_comments: int | None = None
     angle: str = ""
+    #: What a read of the post said besides the above (0039): the author's display name, avatar
+    #: address (already checked by `avatars.safe_avatar`), views and reposts (X), and when read.
+    author_name: str | None = None
+    avatar_url: str | None = None
+    views: int | None = None
+    reposts: int | None = None
+    metrics_at: datetime | None = None
+    #: The author's verification mark and the post's first picture (`{typ, url, szer, wys}`),
+    #: when the read knew them (0039).
+    author_verified: bool | None = None
+    media: dict[str, Any] | None = None
 
 
 def new_opportunity(
@@ -231,6 +256,13 @@ def new_opportunity(
     num_comments: int | None = None,
     angle: str = "",
     require_time: bool = True,
+    author_name: str | None = None,
+    avatar_url: str | None = None,
+    views: int | None = None,
+    reposts: int | None = None,
+    metrics_at: datetime | None = None,
+    author_verified: bool | None = None,
+    media: dict[str, Any] | None = None,
 ) -> NewOpportunity:
     """Validate and normalise. Raises `OpportunityRefused` with a sentence for the agent.
 
@@ -278,9 +310,16 @@ def new_opportunity(
             raise OpportunityRefused("post X wymaga `excerpt`, czyli treści posta z x.search")
     if created_at is not None and created_at.tzinfo is None:
         raise OpportunityRefused("created_at musi mieć strefę czasową (ISO 8601, np. ...Z)")
-    for name, value in (("score", score), ("num_comments", num_comments)):
+    for name, value in (
+        ("score", score),
+        ("num_comments", num_comments),
+        ("views", views),
+        ("reposts", reposts),
+    ):
         if value is not None and (isinstance(value, bool) or not isinstance(value, int)):
             raise OpportunityRefused(f"{name} to liczba całkowita albo brak wartości")
+        if value is not None and name != "score" and value < 0:
+            raise OpportunityRefused(f"{name} nie może być ujemne")
     if num_comments is not None and num_comments < 0:
         raise OpportunityRefused("num_comments nie może być ujemne")
     return NewOpportunity(
@@ -296,7 +335,36 @@ def new_opportunity(
         score=score,
         num_comments=num_comments,
         angle=clip(angle, REASON_CHARS),
+        author_name=clip(author_name, AUTHOR_CHARS) or None,
+        avatar_url=safe_avatar(avatar_url),
+        views=views,
+        reposts=reposts,
+        metrics_at=metrics_at.astimezone(UTC) if metrics_at is not None else None,
+        author_verified=author_verified if isinstance(author_verified, bool) else None,
+        media=_clean_media(media),
     )
+
+
+def _clean_media(media: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The first picture of a post, or `None` when it is not one the card may show: a known type
+    and an address on a platform picture host (`avatars.safe_picture`)."""
+    if not isinstance(media, dict) or media.get("typ") not in ("photo", "video", "gif"):
+        return None
+    address = safe_picture(media.get("url") if isinstance(media.get("url"), str) else None)
+    if address is None:
+        return None
+
+    def size(value: Any) -> int | None:
+        return (
+            value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
+        )
+
+    return {
+        "typ": media["typ"],
+        "url": address,
+        "szer": size(media.get("szer")),
+        "wys": size(media.get("wys")),
+    }
 
 
 @dataclass(frozen=True)
@@ -321,13 +389,54 @@ class OpportunityView:
     #: The live draft revision aimed at this conversation, or `None`.
     draft_revision_id: UUID | None
     dismissed_by: str | None = None
+    #: When the decision to skip was taken (the first time; repeating it does not move it).
+    dismissed_at: datetime | None = None
+    #: What a read of the post said (0039). `None` is "nobody read it", never zero.
+    author_name: str | None = None
+    avatar_url: str | None = None
+    views: int | None = None
+    reposts: int | None = None
+    metrics_at: datetime | None = None
+    gone_at: datetime | None = None
+    author_verified: bool | None = None
+    media: dict[str, Any] | None = None
+
+    @property
+    def metrics(self) -> Metrics:
+        """The counters in the one vocabulary of `ranking.py`: `score` is the likes of an X post
+        and the points of a Reddit one, `num_comments` its replies."""
+        return Metrics(
+            views=self.views, likes=self.score, replies=self.num_comments, reposts=self.reposts
+        )
 
     @property
     def display_title(self) -> str:
         """The title, or for X (which has none) the beginning of the post. Never invented."""
         return self.title or clip(self.excerpt, 90)
 
-    def to_json(self) -> dict[str, Any]:
+    def target_json(self, now: datetime | None = None) -> dict[str, Any]:
+        """The post this conversation is, as the card draws it above a reply (`cel`): avatar,
+        handle, name, age, text, counters and the Trending badge. Every field that was not read
+        is `None`; the avatar is dropped unless its host is the platform's (`avatars.py`)."""
+        moment = now or datetime.now(UTC)
+        return {
+            "autor": self.author,
+            "nazwa": self.author_name,
+            "awatar": safe_avatar(self.avatar_url),
+            "tekst": self.excerpt or self.title,
+            "utworzono": self.created_at_source.isoformat() if self.created_at_source else None,
+            "metryki": self.metrics.to_json(),
+            "pomiar": self.metrics_at.isoformat() if self.metrics_at else None,
+            "trending": is_trending(self.platform, self.created_at_source, self.metrics, moment),
+            "zniknal": self.gone_at is not None,
+            # v11: what makes it look like the post on the platform: the verification mark (`None`
+            # is "not known") and the first picture, whose address the card hands back to
+            # `room.pictures` to get an inline image (it never loads it itself).
+            "zweryfikowany": self.author_verified,
+            "media": _clean_media(self.media),
+        }
+
+    def to_json(self, now: datetime | None = None) -> dict[str, Any]:
         """The shape of `okazje` in the room payload, and of `opportunities.list`."""
         return {
             "id": str(self.id),
@@ -340,10 +449,11 @@ class OpportunityView:
             "utworzono": self.created_at_source.isoformat() if self.created_at_source else None,
             "wynik": self.score,
             "komentarze": self.num_comments,
-            "dlaczego": self.reason,
+            "dlaczego": "" if self.reason == AUTO_REASON else self.reason,
             "kat": self.angle,
             "stan": self.stan,
             "szkic": str(self.draft_revision_id) if self.draft_revision_id else None,
+            "cel": self.target_json(now),
         }
 
 
@@ -355,6 +465,8 @@ _VIEW_SQL = """
 SELECT o.id, o.platform, o.external_id, o.url, o.community, o.title, o.excerpt, o.author,
        o.created_at_source, o.score, o.num_comments, o.reason, o.angle, o.created_at,
        o.dismissed_at, o.dismissed_by,
+       o.author_name, o.avatar_url, o.views, o.reposts, o.metrics_at, o.gone_at,
+       o.author_verified, o.media,
        d.revision_id AS draft_revision_id,
        (EXISTS (
            SELECT 1 FROM publication_requests q
@@ -408,7 +520,26 @@ def _view(row: asyncpg.Record) -> OpportunityView:
         ),
         draft_revision_id=row["draft_revision_id"],
         dismissed_by=row["dismissed_by"],
+        dismissed_at=row["dismissed_at"],
+        author_name=row["author_name"],
+        avatar_url=row["avatar_url"],
+        views=row["views"],
+        reposts=row["reposts"],
+        metrics_at=row["metrics_at"],
+        gone_at=row["gone_at"],
+        author_verified=row["author_verified"],
+        media=_as_json_object(row["media"]),
     )
+
+
+def _as_json_object(value: Any) -> dict[str, Any] | None:
+    """A `jsonb` column as the driver hands it back: text unless a codec was set."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return None
+    return value if isinstance(value, dict) else None
 
 
 @dataclass(frozen=True)
@@ -439,6 +570,12 @@ class OpportunityStore:
         decision to skip: an agent that finds the same post again must not bring back what the
         founder already waved away. `dismiss_by` is the one way to skip, and it keeps the
         earlier author when the opportunity was skipped already.
+
+        THE REASON OF A SKIP IS `reason`, NOT A NEW COLUMN (11.10, "Skipped (N)" on the card).
+        A call with `dismiss_by` stores the agent's one-line reason for NOT answering in `reason`
+        (the tool takes it as `powod`), and a later refresh of an already skipped conversation
+        leaves it alone. A skip made on the page (`dismiss`) has no sentence: the card says who
+        skipped it instead of inventing why.
         """
         async with self._pool.acquire() as conn, conn.transaction():
             row = await conn.fetchrow(
@@ -446,8 +583,10 @@ class OpportunityStore:
                 INSERT INTO project_opportunities
                     (organization_id, workspace_id, project_id, platform, external_id, url,
                      community, title, excerpt, author, created_at_source, score, num_comments,
-                     reason, angle, marked_by_session)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+                     reason, angle, marked_by_session, author_name, avatar_url, views, reposts,
+                     metrics_at, author_verified, media)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+                        $18, $19, $20, $21, $22, $23, $24::jsonb)
                 ON CONFLICT ON CONSTRAINT project_opportunities_one_per_conversation DO UPDATE
                     SET url = EXCLUDED.url,
                         community = EXCLUDED.community,
@@ -461,9 +600,37 @@ class OpportunityStore:
                         score = coalesce(EXCLUDED.score, project_opportunities.score),
                         num_comments = coalesce(EXCLUDED.num_comments,
                                                 project_opportunities.num_comments),
-                        reason = EXCLUDED.reason,
+                        -- A skipped conversation keeps the sentence that says WHY it was skipped
+                        -- (`reason` is that sentence for a skip, see below): a later refresh with
+                        -- the agent's "why it is worth it" must not overwrite it. A call that
+                        -- skips replaces it (the agent's latest reason wins).
+                        reason = CASE WHEN project_opportunities.dismissed_at IS NOT NULL
+                                           AND NOT $17::boolean
+                                      THEN project_opportunities.reason
+                                      ELSE EXCLUDED.reason END,
                         angle = CASE WHEN EXCLUDED.angle <> '' THEN EXCLUDED.angle
                                      ELSE project_opportunities.angle END,
+                        -- A read of the post (0039) refreshes what it carries and never wipes
+                        -- what an earlier read found: a later mark without the numbers keeps them.
+                        author_name = coalesce(EXCLUDED.author_name,
+                                               project_opportunities.author_name),
+                        avatar_url = coalesce(EXCLUDED.avatar_url,
+                                              project_opportunities.avatar_url),
+                        views = coalesce(EXCLUDED.views, project_opportunities.views),
+                        reposts = coalesce(EXCLUDED.reposts, project_opportunities.reposts),
+                        metrics_at = coalesce(EXCLUDED.metrics_at,
+                                              project_opportunities.metrics_at),
+                        author_verified = coalesce(EXCLUDED.author_verified,
+                                                   project_opportunities.author_verified),
+                        media = coalesce(EXCLUDED.media, project_opportunities.media),
+                        -- A post that was only READ for context (`note_context`) and is now marked
+                        -- as a conversation to answer becomes one: its context skip is lifted.
+                        dismissed_at = CASE
+                            WHEN project_opportunities.dismissed_by = $25 AND NOT $17::boolean
+                            THEN NULL ELSE project_opportunities.dismissed_at END,
+                        dismissed_by = CASE
+                            WHEN project_opportunities.dismissed_by = $25 AND NOT $17::boolean
+                            THEN NULL ELSE project_opportunities.dismissed_by END,
                         updated_at = now()
                 RETURNING id, (xmax = 0) AS created
                 """,
@@ -483,6 +650,15 @@ class OpportunityStore:
                 opportunity.reason,
                 opportunity.angle,
                 session_id,
+                dismiss_by is not None,
+                opportunity.author_name,
+                opportunity.avatar_url,
+                opportunity.views,
+                opportunity.reposts,
+                opportunity.metrics_at,
+                opportunity.author_verified,
+                json.dumps(opportunity.media) if opportunity.media is not None else None,
+                CONTEXT_DISMISSER,
             )
             if dismiss_by is not None:
                 await conn.execute(
@@ -536,6 +712,7 @@ class OpportunityStore:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 _VIEW_SQL + " AND ($3::text IS NULL OR o.platform = $3)"
+                " AND o.dismissed_by IS DISTINCT FROM '" + CONTEXT_DISMISSER + "'"
                 " ORDER BY o.created_at_source DESC NULLS LAST, o.created_at DESC LIMIT $4",
                 organization_id,
                 project_id,
@@ -558,6 +735,92 @@ class OpportunityStore:
                 external_ids,
             )
         return {row["external_id"]: _view(row) for row in rows}
+
+    async def note_context(
+        self,
+        *,
+        organization_id: UUID,
+        workspace_id: UUID,
+        project_id: UUID,
+        opportunity: NewOpportunity,
+    ) -> UUID:
+        """Keep a post that a draft QUOTES, read for context only (v11).
+
+        A post nobody saved is stored already dismissed by `CONTEXT_DISMISSER`, so it is no page of
+        the card, no "Skipped" row and no count anywhere. A post that already stands as an
+        opportunity (the trend pass saved it, an agent marked it) is only REFRESHED with what the
+        read found: its state, its reason and its skip are exactly what they were.
+        """
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO project_opportunities
+                    (organization_id, workspace_id, project_id, platform, external_id, url,
+                     community, title, excerpt, author, created_at_source, score, num_comments,
+                     reason, angle, author_name, avatar_url, views, reposts, metrics_at,
+                     author_verified, media, dismissed_at, dismissed_by)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, '', $15,
+                        $16, $17, $18, $19, $20, $21::jsonb, now(), $22)
+                ON CONFLICT ON CONSTRAINT project_opportunities_one_per_conversation DO UPDATE
+                    SET excerpt = CASE WHEN EXCLUDED.excerpt <> '' THEN EXCLUDED.excerpt
+                                       ELSE project_opportunities.excerpt END,
+                        author = coalesce(EXCLUDED.author, project_opportunities.author),
+                        created_at_source = coalesce(EXCLUDED.created_at_source,
+                                                     project_opportunities.created_at_source),
+                        score = coalesce(EXCLUDED.score, project_opportunities.score),
+                        num_comments = coalesce(EXCLUDED.num_comments,
+                                                project_opportunities.num_comments),
+                        author_name = coalesce(EXCLUDED.author_name,
+                                               project_opportunities.author_name),
+                        avatar_url = coalesce(EXCLUDED.avatar_url,
+                                              project_opportunities.avatar_url),
+                        views = coalesce(EXCLUDED.views, project_opportunities.views),
+                        reposts = coalesce(EXCLUDED.reposts, project_opportunities.reposts),
+                        metrics_at = coalesce(EXCLUDED.metrics_at,
+                                              project_opportunities.metrics_at),
+                        author_verified = coalesce(EXCLUDED.author_verified,
+                                                   project_opportunities.author_verified),
+                        media = coalesce(EXCLUDED.media, project_opportunities.media),
+                        updated_at = now()
+                RETURNING id
+                """,
+                organization_id,
+                workspace_id,
+                project_id,
+                opportunity.platform,
+                opportunity.external_id,
+                opportunity.url,
+                opportunity.community,
+                opportunity.title,
+                opportunity.excerpt,
+                opportunity.author,
+                opportunity.created_at,
+                opportunity.score,
+                opportunity.num_comments,
+                opportunity.reason,
+                opportunity.author_name,
+                opportunity.avatar_url,
+                opportunity.views,
+                opportunity.reposts,
+                opportunity.metrics_at,
+                opportunity.author_verified,
+                json.dumps(opportunity.media) if opportunity.media is not None else None,
+                CONTEXT_DISMISSER,
+            )
+        return row["id"]  # type: ignore[no-any-return]
+
+    async def note_gone(self, *, organization_id: UUID, project_id: UUID, external_id: str) -> bool:
+        """The account's own browser says the post is not there (`gone_at`, 0039). Once."""
+        async with self._pool.acquire() as conn:
+            changed = await conn.fetchval(
+                "UPDATE project_opportunities SET gone_at = now(), updated_at = now() "
+                "WHERE organization_id = $1 AND project_id = $2 AND external_id = $3 "
+                "AND gone_at IS NULL RETURNING true",
+                organization_id,
+                project_id,
+                external_id,
+            )
+        return bool(changed)
 
     async def dismiss(
         self,

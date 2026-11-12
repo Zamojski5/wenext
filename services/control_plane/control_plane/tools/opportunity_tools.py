@@ -42,6 +42,7 @@ founder has no dashboard (`hosted_view`).
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import os
 from datetime import UTC, datetime
@@ -49,10 +50,13 @@ from typing import Any
 from urllib.parse import quote, urlsplit
 from uuid import UUID
 
+from control_plane.demo import is_demo_organization
 from control_plane.observe.text_rules import clean_text, count_long_dashes
 from control_plane.opportunities.ingest import ensure_reddit_thread
 from control_plane.opportunities.manual import ManualPostRefused, record_manual_post
-from control_plane.opportunities.room import room_view
+from control_plane.opportunities.pictures import account_avatar
+from control_plane.opportunities.ranking import account_fit
+from control_plane.opportunities.room import MAX_PAGES, room_view, skipped_view
 from control_plane.opportunities.store import (
     OPEN_STATUSES,
     PLATFORMS,
@@ -70,8 +74,10 @@ from control_plane.opportunities.store import (
     room_path,
     x_status_id,
 )
+from control_plane.presence.card_consent import scope_summary
 from control_plane.tools.apps_ui import card_language
 
+from .card_actions import SESSION_LOST_CODE
 from .x_tools import X_MAX_WEIGHT, x_text_weight
 
 REDDIT_READ_NOTE = (
@@ -169,10 +175,15 @@ OPPORTUNITY_TOOL_SPECS = (
             "url z permalink, excerpt z text, author, created_at z published_at). Nie dopisuj "
             "tego, czego wynik nie podał: brakujący licznik zostaw pusty.\n"
             "Powtórzenie jest bezpieczne: ta sama rozmowa to ta sama okazja, odświeża liczniki i "
-            "Twoje zdania, a NIE cofa decyzji założyciela o pominięciu. pomin=true pomija okazję "
-            "(np. nieaktualną); powód zostaw w `dlaczego`. Następny krok to draft.create z "
+            "Twoje zdania, a NIE cofa decyzji o pominięciu. Następny krok to draft.create z "
             "adresem tej rozmowy: szkic sam połączy się z okazją. Wynik podaje `pokoj`, czyli "
-            "ścieżkę strony, na której założyciel zobaczy okazje, szkice i wyniki."
+            "ścieżkę strony, na której założyciel zobaczy okazje, szkice i wyniki.\n"
+            "POMINIĘTE ROZMOWY TEŻ ZAPISUJ: każdą rozmowę, którą przeczytałeś i postanowiłeś NIE "
+            "odpowiadać (zamknięta, nie ta osoba, sprzedażowa, zła społeczność), zapisz z "
+            "pomin=true i jednozdaniowym `powod`. Założyciel widzi je na karcie pod „Pominięte "
+            "(N)” razem z Twoim powodem, więc „pominąłem ją, bo...” da się sprawdzić. "
+            "Przy pomin=true `powod` zastępuje `dlaczego`; powód nie wraca na listę rozmów do "
+            "odpowiedzi."
         ),
         "state": "DOSTEPNE",
         "writes": True,
@@ -215,7 +226,18 @@ OPPORTUNITY_TOOL_SPECS = (
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 600,
-                    "description": "Czemu ta rozmowa jest warta uwagi, jedno lub dwa zdania.",
+                    "description": (
+                        "Czemu ta rozmowa jest warta uwagi, jedno lub dwa zdania. Wymagane, chyba "
+                        "że pomin=true (wtedy wystarczy `powod`)."
+                    ),
+                },
+                "powod": {
+                    "type": "string",
+                    "maxLength": 600,
+                    "description": (
+                        "Tylko z pomin=true: jedno zdanie, czemu NIE odpowiadasz w tej rozmowie. "
+                        "Założyciel widzi je na karcie pod „Pominięte”."
+                    ),
                 },
                 "kat": {
                     "type": "string",
@@ -225,10 +247,13 @@ OPPORTUNITY_TOOL_SPECS = (
                 "pomin": {
                     "type": "boolean",
                     "default": False,
-                    "description": "Pomiń tę okazję (znika z Pokoju).",
+                    "description": (
+                        "Pomiń tę rozmowę: znika z listy do odpowiedzi i pokazuje się pod "
+                        "„Pominięte” z `powod`."
+                    ),
                 },
             },
-            "required": ["platform", "url", "dlaczego"],
+            "required": ["platform", "url"],
             "additionalProperties": False,
         },
         "tags": ("okazje", "działanie"),
@@ -305,13 +330,40 @@ OPPORTUNITY_TOOL_SPECS = (
             "Niczego nie zmienia i niczego nie publikuje: odpowiedź zatwierdza założyciel jednym "
             "kliknięciem w Pokoju. Karta nie zastępuje Twojej odpowiedzi: powiedz własnymi "
             "słowami, co jest do zrobienia. Wynik ma te same klucze co strona (`okazje`, `szkice`, "
-            "`wyniki`) i `pokoj`, a gdy launcher zna adres dashboardu, także `pokoj_adres`."
+            "`wyniki`) i `pokoj`, a gdy launcher zna adres dashboardu, także `pokoj_adres`. "
+            "Do tego `pominiete` (rozmowy, których nie wzięto, z powodem) i, w lokalnej "
+            "wtyczce, `zakres` (podpisany zakres: stan, konta, limity, termin). Gdy odmowa "
+            "wysyłki albo narzędzia dotyczy zakresu albo limitu, zawołaj to narzędzie: karta ma "
+            "wtedy panel Limity, w którym człowiek sam to zmienia. Podobnie `konta_stan`: dla "
+            "każdego konta X i Reddita mówi, czy przeglądarka agenta ma jego sesję (połączone, "
+            "utracona, nigdy niepołączone). Gdy narzędzie odpowie, że przeglądarka agenta nie ma "
+            "sesji konta, zawołaj to narzędzie: stopka karty ma wtedy przycisk Połącz ponownie, "
+            "którym człowiek loguje się sam; Ty nigdy tego nie robisz.\n"
+            "KARTA MA NAJWYŻEJ OSIEM STRON, najlepsze pierwsze: szkice szereguje świeżość posta, "
+            "to, jak szybko rośnie, i to, czy konto da się dziś użyć (zakres, sesja); `ukryte` "
+            "mówi, ile szkiców i nowych rozmów zostało poza tymi ośmioma (nic nie jest "
+            "kasowane). Każdy szkic odpowiedzi niesie post, na który odpowiada (`cel` w "
+            "okazji: autor, zdjęcie, tekst, wiek, liczniki, znaczek weryfikacji, pierwszy obraz, "
+            "`trending`), a własny post na X, którego tekst KOŃCZY się adresem posta, to cytat "
+            "(`cytat`): karta rysuje go jak X, więc nie dopisuj adresu drugi raz i nie powtarzaj "
+            "w tekście tego, co jest w cytowanym poście."
         ),
         "state": "DOSTEPNE",
         "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
         "tags": ("okazje",),
     },
 )
+
+
+def _session_code(exc: Exception) -> dict[str, str]:
+    """`kod` for a Reddit refusal that the person's own sign-in fixes, else nothing.
+
+    The reader says `login_required` when Reddit shows a login wall, which also covers a
+    community that does not let the capsule's account in: a sign-in fixes the first, and the
+    Reconnect button is the honest next step for both (the card shows the account's health).
+    Not added for any other kind: a rate limit or a dead capsule is not the person's to fix.
+    """
+    return {"kod": SESSION_LOST_CODE} if getattr(exc, "kind", None) == "login_required" else {}
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -494,8 +546,119 @@ def hosted_view(result: dict[str, Any]) -> dict[str, Any]:
     return shown
 
 
+def _account_fits(scope: dict[str, Any] | None, health: list[dict[str, Any]]) -> dict[str, float]:
+    """`PLATFORM:login` (lower case) -> `ranking.account_fit`, for every account the card knows.
+    Empty for a hosted session (no scope, nothing sent by Wenext: every draft fits)."""
+    if scope is None:
+        return {}
+    live = scope.get("stan") == "AKTYWNY"
+    state = {
+        f"{one.get('platforma')}:{one.get('konto')}".lower(): one.get("stan") for one in health
+    }
+    fits: dict[str, float] = {}
+    for account in scope.get("do_wyboru") or []:
+        key = f"{account.get('platforma')}:{account.get('konto')}".lower()
+        fits[key] = account_fit(
+            in_scope=bool(account.get("w_zakresie")), scope_live=live, health=state.get(key)
+        )
+    return fits
+
+
+async def _with_account_pictures(
+    drafts: list[dict[str, Any]], *, hosted: bool
+) -> list[dict[str, Any]]:
+    """`konto_awatar` of each draft: the picture of the account it leaves from, for the reply the
+    card draws under the post. Read once a day per account (`pictures.account_avatar`), bounded to
+    a few seconds for the whole page, and never a reason for the page not to come: a draft without
+    one simply has none. Not for a hosted session, whose account is a placeholder."""
+    if hosted or not drafts:
+        return drafts
+    accounts = sorted(
+        {(d["platforma"], d["konto"]) for d in drafts if d.get("konto") and d["platforma"] == "X"}
+    )
+    if not accounts:
+        return drafts
+    try:
+        found = await asyncio.wait_for(
+            asyncio.gather(*(account_avatar(platform, login) for platform, login in accounts)),
+            timeout=4.0,
+        )
+    except Exception:
+        return drafts
+    by_account = dict(zip(accounts, found, strict=True))
+    return [{**d, "konto_awatar": by_account.get((d["platforma"], d.get("konto")))} for d in drafts]
+
+
 class OpportunityTools:
     """Mixin of `ToolRegistry`: the two live Reddit reads, the opportunity tools and the room."""
+
+    async def _x_page_reader(self, url: str) -> Any:
+        """The founder's own browser reading one X post (`x.read`'s path), or `None`. Best effort:
+        the snapshot of a reply's target has other sources and this one is the fallback."""
+        try:
+            source, refusal, _handle, _note = await self._x_ready()  # type: ignore[attr-defined]
+        except Exception:
+            return None
+        if refusal is not None or source is None:
+            return None
+        try:
+            return await source.read_post(url)
+        finally:
+            await source.aclose()
+
+    async def _reddit_thread_reader(self, url: str) -> Any:
+        """One Reddit post through the reader `reddit.read` uses, or `None`."""
+        module = _reddit_search_module()
+        if module is None:
+            return None
+        return await module.read_reddit_thread(url, max_comments=1)
+
+    async def _record_reply_target(
+        self, *, kind: str, platform: str, target_external_id: str, target_url: str
+    ) -> None:
+        """The step of `draft.create`: keep the post a reply answers with its conversation, so the
+        card shows it above the reply (v11). Best effort; `WENEXT_TARGET_CONTEXT=off` skips it."""
+        if (os.environ.get("WENEXT_TARGET_CONTEXT") or "").strip().lower() == "off":
+            return
+        from control_plane.opportunities.target_context import Readers, record_reply_target
+
+        capability = self.capability  # type: ignore[attr-defined]
+        hosted = self._is_hosted()
+        await record_reply_target(
+            self.pool,  # type: ignore[attr-defined]
+            organization_id=capability.organization_id,
+            workspace_id=capability.workspace_id,
+            project_id=capability.project_id,
+            session_id=capability.session_id,
+            kind=kind,
+            platform=platform,
+            target_external_id=target_external_id,
+            target_url=target_url,
+            readers=Readers(
+                x_page=None if hosted else self._x_page_reader,
+                reddit_thread=None if hosted else self._reddit_thread_reader,
+            ),
+        )
+
+    async def _record_quote_context(self, *, kind: str, platform: str, text: str) -> None:
+        """The step of `draft.create` for a QUOTE on X (an own post ending with a status address):
+        keep the quoted post for context. Best effort; `WENEXT_TARGET_CONTEXT=off` skips it."""
+        if (os.environ.get("WENEXT_TARGET_CONTEXT") or "").strip().lower() == "off":
+            return
+        from control_plane.opportunities.target_context import Readers, record_quote_context
+
+        capability = self.capability  # type: ignore[attr-defined]
+        hosted = self._is_hosted()
+        await record_quote_context(
+            self.pool,  # type: ignore[attr-defined]
+            organization_id=capability.organization_id,
+            workspace_id=capability.workspace_id,
+            project_id=capability.project_id,
+            kind=kind,
+            platform=platform,
+            text=text,
+            readers=Readers(x_page=None if hosted else self._x_page_reader),
+        )
 
     def _is_hosted(self) -> bool:
         """Whether this session is served by the hosted endpoint. `getattr` with a default so a
@@ -533,6 +696,7 @@ class OpportunityTools:
             return unavailable(
                 str(exc),
                 rodzaj=getattr(exc, "kind", None),
+                **_session_code(exc),
                 wskazowka=(
                     "To odpowiedź o środowisku, nie o Reddicie: nie ponawiaj w pętli. Powiedz, "
                     "czego nie dało się sprawdzić, i pracuj na tym, co produkt już zebrał."
@@ -593,6 +757,7 @@ class OpportunityTools:
             return unavailable(
                 str(exc),
                 rodzaj=getattr(exc, "kind", None),
+                **_session_code(exc),
                 wskazowka=(
                     "To odpowiedź o środowisku albo o wątku, nie o treści: nie ponawiaj w pętli."
                 ),
@@ -732,16 +897,40 @@ class OpportunityTools:
             fields["pokoj_adres"] = f"{base}{path}"
         return fields
 
+    def _accounts_address(self) -> dict[str, Any]:
+        """`konta_adres`: where the dashboard lets the person sign the agent's browser in, for a
+        host that cannot do it in the chat (the Claude Code pane). Only when the launcher knows
+        the dashboard; the operations page holds the "agent's browser" card with its Connect."""
+        base = (os.environ.get("WENEXT_DASHBOARD_URL") or "").strip().rstrip("/")
+        return {"konta_adres": f"{base}/community"} if base else {}
+
     async def _room_show(self, args: dict[str, Any]) -> dict[str, Any]:
         from .registry import done
 
         capability = self.capability  # type: ignore[attr-defined]
+        hosted = self._is_hosted()
+        # The scope and the footer's health are read FIRST: they say which accounts the founder can
+        # send from right now, and the card shows only the best eight drafts (`room.MAX_PAGES`), so
+        # a draft whose account cannot send ranks behind one whose account can (`account_fit`).
+        scope = None
+        health: list[dict[str, Any]] = []
+        if not hosted:
+            scope = await scope_summary(
+                self.pool,  # type: ignore[attr-defined]
+                organization_id=capability.organization_id,
+                workspace_id=capability.workspace_id,
+                project_id=capability.project_id,
+            )
+            health = await self._room_health()  # type: ignore[attr-defined]
         room = await room_view(
             self.pool,  # type: ignore[attr-defined]
             organization_id=capability.organization_id,
             workspace_id=capability.workspace_id,
             project_id=capability.project_id,
+            fit=_account_fits(scope, health),
+            max_pages=MAX_PAGES,
         )
+        room = {**room, "szkice": await _with_account_pictures(room["szkice"], hosted=hosted)}
         # Where the person resumes or widens a signed scope, for the card's refusals (`card_send`).
         presence = presence_path(capability.workspace_id, capability.project_id)
         fields = self._room_fields()
@@ -749,7 +938,13 @@ class OpportunityTools:
         # The language the person pinned for the card (WENEXT_LANG, `apps_ui`): present only when
         # they did, so the card decides by the host's locale otherwise. It changes no data.
         language = card_language()
-        hosted = self._is_hosted()
+        # "Skipped (N)": what the agent looked at and decided not to answer, with its reason.
+        # Also for a hosted session: it is a fact about the conversations, not about sending.
+        skipped = await skipped_view(
+            self.pool,  # type: ignore[attr-defined]
+            organization_id=capability.organization_id,
+            project_id=capability.project_id,
+        )
         if hosted:
             # Manual sending: each draft says where the founder posts it. The account is a
             # placeholder of the project, not a login of theirs, so the card is not given it.
@@ -767,7 +962,26 @@ class OpportunityTools:
                 "obecnosc": presence,
                 **({"obecnosc_adres": address} if address else {}),
                 **({"jezyk": language} if language else {}),
+                # The recording sandbox (`control_plane/demo.py`): an organization that exists to be
+                # filmed and that nothing may act for. A pane that has no way to send (the Claude
+                # Code mod) may REHEARSE the flow on it and says so; it is never set for any other.
+                **({"demo": True} if is_demo_organization(capability.organization_id) else {}),
                 "wysylka": SEND_MANUAL if hosted else SEND_CARD,
+                **skipped,
+                # The signed scope and what the Limits panel starts from (`scope_summary`). Not for
+                # a hosted session: nothing is sent by Wenext there, so there is no scope.
+                **(
+                    {}
+                    if hosted
+                    else {
+                        "zakres": scope,
+                        # The footer's dots (v10): for each assigned X or Reddit account, whether
+                        # the agent's browser is signed in as it. A fact about the person's own
+                        # browser: not for a hosted session, which has neither.
+                        "konta_stan": health,
+                        **self._accounts_address(),
+                    }
+                ),
             }
         )
 
@@ -888,6 +1102,20 @@ class OpportunityTools:
         if not isinstance(pomin, bool):
             raise ToolError("pomin musi być wartością logiczną")
         reason, angle = str(args.get("dlaczego") or ""), str(args.get("kat") or "")
+        skip_reason = str(args.get("powod") or "")
+        if skip_reason.strip() and not pomin:
+            raise ToolError(
+                "powod ma sens tylko z pomin=true. Okazji do odpowiedzi uzasadnia `dlaczego`"
+            )
+        if pomin:
+            # A skip is explained by WHY NOT, and that sentence is the one the founder reads under
+            # "Pominięte": `powod`, else the old way (`dlaczego`). It is stored as the reason.
+            reason = skip_reason if skip_reason.strip() else reason
+            if not reason.strip():
+                raise ToolError(
+                    "pominięcie bez powodu to cicha decyzja: napisz w `powod` jednym zdaniem, "
+                    "czemu nie odpowiadasz w tej rozmowie. Założyciel zobaczy to zdanie na karcie"
+                )
         # The founder's rule on a glyph (`observe/text_rules.py`): the two sentences are the
         # agent's own words and are shown to a person, so no long dash gets through.
         dashes = count_long_dashes(reason) + count_long_dashes(angle)

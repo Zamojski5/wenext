@@ -47,7 +47,7 @@ _INSERT = (
 
 
 async def test_the_table_has_exactly_the_declared_columns(pool) -> None:
-    assert len(PROJECT_OPPORTUNITIES_COLUMNS) == 21
+    assert len(PROJECT_OPPORTUNITIES_COLUMNS) == 29
     async with pool.acquire() as connection:
         rows = await connection.fetch(
             "SELECT column_name FROM information_schema.columns"

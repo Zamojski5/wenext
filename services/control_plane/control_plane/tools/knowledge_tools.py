@@ -192,6 +192,9 @@ KNOWLEDGE_TOOL_SPECS: tuple[dict[str, Any], ...] = (
             "opublikowaliśmy. Zawiera sytuację (społeczność, ruch, wiek wątku), decyzję "
             "(długość, konto) i wynik (punkty, odpowiedzi, usunięcie, cisza) z datą pomiaru. "
             "To nie jest fakt o świecie, tylko obserwacja jednego przypadku.\n"
+            "Rodzaj `LESSON` to wniosek policzony przez produkt z pomiarów opublikowanych "
+            "odpowiedzi i postów (z liczebnością `n` po obu stronach porównania) albo reguła "
+            "zasiana w pamięci i oznaczona jako reguła. Zwykle czytasz je przez `playbook.read`.\n"
             "Rodzaj `PREFERENCE` przy publikacji to krótka korekta człowieka („za długie”, „nie "
             "w ten sposób”, „dobrze”, „nie odpowiadaj tu”). Zastosuj ją w następnej decyzji, "
             "a w odpowiedzi powiedz, co z tego powodu zrobiłeś inaczej.\n"
@@ -208,7 +211,7 @@ KNOWLEDGE_TOOL_SPECS: tuple[dict[str, Any], ...] = (
                 },
                 "kind": {
                     "type": "string",
-                    "enum": ["FACT", "INTERPRETATION", "PREFERENCE", "EXPERIENCE"],
+                    "enum": ["FACT", "INTERPRETATION", "PREFERENCE", "EXPERIENCE", "LESSON"],
                     "description": "Tylko ustalenia tego rodzaju.",
                 },
                 "community": {
@@ -380,6 +383,17 @@ def item_payload(
             "z datą pomiaru. Możesz się na nim oprzeć, ale powiedz wprost, że to nasz wynik."
         )
         payload["publikacja"] = item.payload.get("request_id")
+    if item.kind == "LESSON":
+        # SAID ON EVERY ROW. A lesson is a tendency in OUR small history, with its n, or a rule
+        # somebody stated; a model that reads it as a fact about the world, or a rule as a
+        # measurement, will state something nobody measured.
+        payload["uwaga_rodzaj"] = (
+            "To reguła zapisana w pamięci, nie pomiar."
+            if item.payload.get("rule") is True
+            else "To wniosek policzony z naszych pomiarów (`n` w treści): tendencja w małej, "
+            "własnej historii, nie przyczyna i nie fakt o świecie. Powiedz wprost, że to nasz "
+            "wynik."
+        )
     if item.kind == "PREFERENCE":
         payload["uwaga_rodzaj"] = (
             "To wola człowieka, nie Twój wniosek. Zastosuj ją i napisz w odpowiedzi, co z jej "
@@ -389,7 +403,7 @@ def item_payload(
             payload["publikacja"] = item.payload.get("request_id")
         if item.payload.get("experience_id"):
             payload["dotyczy_doswiadczenia"] = item.payload.get("experience_id")
-    if source is None and item.kind not in ("EXPERIENCE", "PREFERENCE"):
+    if source is None and item.kind not in ("EXPERIENCE", "PREFERENCE", "LESSON"):
         payload["uwaga_zrodlo"] = (
             "To ustalenie nie stoi na żadnym materiale. Jeśli powołujesz się na nie w "
             "odpowiedzi, powiedz, że pochodzi z rozmowy, a nie ze źródła."

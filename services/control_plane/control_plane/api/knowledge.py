@@ -91,6 +91,9 @@ ADDABLE_KINDS: tuple[str, ...] = (
 )
 
 ITEM_KINDS: tuple[str, ...] = ("FACT", "INTERPRETATION", "PREFERENCE", "EXPERIENCE")
+#: What the list may be narrowed to. `LESSON` (0040) is computed from measurements by the learning
+#: sweep and cannot be created here, so it is a filter and not an `ITEM_KINDS` entry.
+FILTER_KINDS: tuple[str, ...] = (*ITEM_KINDS, "LESSON")
 STATED_BY: tuple[str, ...] = ("USER", "AGENT", "SOURCE")
 
 
@@ -336,7 +339,7 @@ async def read_knowledge(
     items = await store.list(
         scope,
         include_retired=include_retired,
-        kind=_checked(kind, ITEM_KINDS, "rodzaj ustalenia") if kind else None,
+        kind=_checked(kind, FILTER_KINDS, "rodzaj ustalenia") if kind else None,
         community=community,
         account=account,
     )

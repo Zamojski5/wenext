@@ -170,6 +170,10 @@ WORKSPACE_TABLES: tuple[str, ...] = (
     "external_identities",
     # Migracja 0038 (hostowany MVP): rewizja szkicu, którą człowiek wkleił sam i powiedział o tym.
     "manual_publications",
+    # Migracja 0040 (pętla uczenia): opublikowana rzecz z kontekstem sprzed publikacji. Migawki
+    # liczników (`learning_snapshots`) nie niosą `workspace_id`: wiszą na rzeczy parą
+    # (organization_id, post_id), więc w tej liście ich nie ma.
+    "learning_posts",
 )
 
 #: Parent of every workspace table of 0004 that has a workspace-scoped parent, reached through
@@ -873,9 +877,11 @@ KNOWLEDGE_SOURCE_KINDS: frozenset[str] = frozenset(
 KNOWLEDGE_SOURCE_STATUSES: frozenset[str] = frozenset({"FETCHED", "UNAVAILABLE", "STALE"})
 
 #: The four kinds P3 asks the result to distinguish: "fakt, interpretację, preferencję człowieka
-#: i doświadczenie z działań". The distinction is the deliverable, not a label.
+#: i doświadczenie z działań". The distinction is the deliverable, not a label. Since migration
+#: 0040 a fifth: `LESSON`, a conclusion COMPUTED from many measured publications (never written by
+#: a model), which carries both sides of its comparison with their `n`.
 KNOWLEDGE_ITEM_KINDS: frozenset[str] = frozenset(
-    {"FACT", "INTERPRETATION", "PREFERENCE", "EXPERIENCE"}
+    {"FACT", "INTERPRETATION", "PREFERENCE", "EXPERIENCE", "LESSON"}
 )
 KNOWLEDGE_STATED_BY: frozenset[str] = frozenset({"USER", "AGENT", "SOURCE"})
 
@@ -1041,7 +1047,87 @@ PROJECT_OPPORTUNITIES_COLUMNS: tuple[str, ...] = (
     "updated_at",
     "dismissed_at",
     "dismissed_by",
+    # Migracja 0039: post, na który odpowiada szkic (autor, awatar, liczniki X, kiedy odczytano).
+    "author_name",
+    "avatar_url",
+    "views",
+    "reposts",
+    "metrics_at",
+    "gone_at",
+    "author_verified",
+    "media",
 )
+
+#: Migracja 0040: opublikowana rzecz i jej kontekst (pętla uczenia). Cecha, której nikt nie
+#: ustalił, to NULL, nigdy zero.
+LEARNING_POSTS_COLUMNS: tuple[str, ...] = (
+    "id",
+    "organization_id",
+    "workspace_id",
+    "project_id",
+    "platform",
+    "kind",
+    "origin",
+    "request_id",
+    "manual_publication_id",
+    "external_id",
+    "permalink",
+    "account",
+    "body",
+    "published_at",
+    "target_external_id",
+    "target_url",
+    "target_author",
+    "target_followers",
+    "target_created_at",
+    "target_age_minutes",
+    "position_replies",
+    "hook",
+    "hook_source",
+    "mentions_wenext",
+    "has_link",
+    "facts",
+    "created_at",
+    "updated_at",
+)
+
+#: Migracja 0040: liczniki rzeczy w ustalonych momentach (około 1, 6, 24 i 72 godziny).
+LEARNING_SNAPSHOTS_COLUMNS: tuple[str, ...] = (
+    "id",
+    "organization_id",
+    "post_id",
+    "horizon_hours",
+    "measured_at",
+    "age_minutes",
+    "views",
+    "likes",
+    "replies",
+    "reposts",
+    "source",
+    "raw",
+    "created_at",
+)
+
+#: Zamknięte listy 0040. Źródłem tych słów jest `control_plane.learning.model`, a test
+#: `test_learning_schema` pilnuje, żeby CHECK-i w bazie miały dokładnie te wartości.
+LEARNING_POST_HOOKS: frozenset[str] = frozenset(
+    {
+        "BOL",
+        "PROWOKACJA",
+        "DEMO",
+        "LICZBA",
+        "PYTANIE",
+        "NEWS",
+        "POMOC",
+        "OPINIA",
+        "ZART",
+        "INNE",
+    }
+)
+LEARNING_SNAPSHOT_SOURCES: frozenset[str] = frozenset(
+    {"CAPSULE", "FXTWITTER", "OBSERVATION", "DIARY"}
+)
+LEARNING_SNAPSHOT_HORIZONS: tuple[int, ...] = (1, 6, 24, 72)
 
 #: Migracja 0037 — tokeny hostowanego MCP. Klucz główny to SHA-256 tokenu (64 znaki hex), nigdy
 #: sam token. Cofnięcie to `revoked_at`, nie DELETE.
@@ -1520,6 +1606,11 @@ __all__ = [
     "KNOWLEDGE_SOURCE_STATUSES",
     "KNOWLEDGE_STATED_BY",
     "KNOWLEDGE_TABLE_COLUMNS",
+    "LEARNING_POSTS_COLUMNS",
+    "LEARNING_POST_HOOKS",
+    "LEARNING_SNAPSHOTS_COLUMNS",
+    "LEARNING_SNAPSHOT_HORIZONS",
+    "LEARNING_SNAPSHOT_SOURCES",
     "MEMBERSHIPS_COLUMNS",
     "MEMBERSHIP_ROLES",
     "MIXED_SCOPE_TABLES",

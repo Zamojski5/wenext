@@ -822,16 +822,17 @@ async def test_every_workspace_table_carries_the_tenant_triple(pool) -> None:
     ("lista pusta nie może przejść — `all([])` to pułapka, która trafiła tu już dwa razy").
     """
     # Six from 0003 plus eight from 0004 (observation and judgment, docs/OUTCOMES.md §5).
-    assert len(WORKSPACE_TABLES) == 45, (
+    assert len(WORKSPACE_TABLES) == 46, (
         f"jawna lista tabel workspace'owych ma {len(WORKSPACE_TABLES)} pozycji, oczekiwano "
-        "czterdziestu pięciu (0005 dodała community_voice_cards, 0006 trzy tabele pilota, "
+        "czterdziestu sześciu (0005 dodała community_voice_cards, 0006 trzy tabele pilota, "
         "0007 trzy tabele publikacji, 0008 dwie tabele polityki publikacji, 0013 cztery tabele "
         "P1: projekty, profile osób i dwa przypięcia, 0015 dwie tabele P2: agent_sessions "
         "i session_events, 0016 dwie tabele wiedzy, 0017 trzy tabele obecności: "
         "delegacje, obudzenia i ich zdarzenia, 0022 person_voice_versions, "
         "0024 project_visits, 0028 trzy tabele dokumentów projektu: tożsamość, wersje i zdania, "
         "0035 zapytania X agenta i zebrane posty X, 0036 okazje projektu, 0037 tokeny "
-        "hostowanego MCP i tożsamości z logowania OAuth, 0038 manual_publications)"
+        "hostowanego MCP i tożsamości z logowania OAuth, 0038 manual_publications, "
+        "0040 learning_posts)"
     )
     async with pool.acquire() as connection:
         for table in WORKSPACE_TABLES:
@@ -900,8 +901,8 @@ async def test_no_undeclared_table_carries_a_workspace_column(pool) -> None:
     declared = set(WORKSPACE_TABLES) | set(MIXED_SCOPE_TABLES)
     # 0022 person_voice_versions, 0024 project_visits, 0028 trzy tabele dokumentów projektu,
     # 0035 x_watch_queries i x_trend_posts, 0036 project_opportunities, 0037 hosted_tokens i external_identities,
-    # 0038 manual_publications.
-    assert len(declared) == 48, declared
+    # 0038 manual_publications, 0040 learning_posts.
+    assert len(declared) == 49, declared
     async with pool.acquire() as connection:
         rows = await connection.fetch(
             """

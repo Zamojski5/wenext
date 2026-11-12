@@ -11,6 +11,7 @@ and no tool name that does not exist (a renamed tool would otherwise stay switch
 from __future__ import annotations
 
 import importlib.util
+import json
 import re
 import tomllib
 from pathlib import Path
@@ -81,3 +82,80 @@ def test_writing_the_files_is_idempotent_and_keeps_them_out_of_git(project, tmp_
 def test_a_folder_that_does_not_exist_is_refused(project, tmp_path) -> None:
     with pytest.raises(SystemExit):
         project.write(tmp_path / "nowhere")
+
+
+# ---------------------------------------------------------------------------
+# The Claude Code half (`--host claude-code`): `.claude/settings.local.json` and CLAUDE.md
+# ---------------------------------------------------------------------------
+
+#: Anything that sends, signs, approves, connects an account or publishes. Never allowed on the take.
+FORBIDDEN_TO_ALLOW = re.compile(r"send|sign|approve|publish|delegat|connect|login|grant|decid|room_post", re.I)
+
+
+def test_claude_settings_pin_the_sandbox_in_english_for_this_folder_only(project) -> None:
+    settings = json.loads(project.render_claude_settings())
+    env = settings["env"]
+    assert env["WENEXT_PROJECT"] == "tallymark"
+    assert env["WENEXT_ORGANIZATION"] == str(demo.DEMO_ORGANIZATION_ID)
+    assert env["WENEXT_LANG"] == "en" and env["WENEXT_HOST"] == "claude-code"
+    assert Path(env["WENEXT_HOME"], "docker-compose.yml").is_file()
+    # Only keys the launcher knows, and nothing that carries a secret.
+    assert set(env) == {"WENEXT_HOME", "WENEXT_PROJECT", "WENEXT_ORGANIZATION", "WENEXT_LANG", "WENEXT_HOST"}
+
+
+def test_claude_settings_deny_every_reading_tool_and_the_web_and_allow_no_send(project) -> None:
+    permissions = json.loads(project.render_claude_settings())["permissions"]
+    prefix = project.CLAUDE_TOOL_PREFIX
+    deny = set(permissions["deny"])
+    assert {"WebSearch", "WebFetch"} <= deny
+    assert {prefix + "reddit_search", prefix + "x_read", prefix + "browser_inspect", prefix + "accounts_connect"} <= deny
+    # Every denied name is a real tool of the plugin profile, spelled the way Claude Code spells it.
+    spelled = {prefix + name.replace(".", "_") for name in PLUGIN_TOOLS}
+    assert {name for name in deny if name.startswith(prefix)} <= spelled
+    allow = permissions["allow"]
+    assert set(allow) <= spelled and not set(allow) & deny
+    assert allow == [prefix + "room_show", prefix + "opportunities_list", prefix + "draft_create", prefix + "opportunities_mark"]
+    for name in allow:
+        assert not FORBIDDEN_TO_ALLOW.search(name[len(prefix) :]), name
+    # What the film needs is on the list and only that.
+    assert set(project.CLAUDE_ALLOWED_TOOLS) <= PLUGIN_TOOLS
+
+
+def test_claude_md_is_plain_says_never_to_send_and_has_no_long_dash(project) -> None:
+    text = project.CLAUDE_MD
+    assert not LONG_DASHES.search(text) and not LONG_DASHES.search(project.render_claude_settings())
+    assert "/wenext" in text and "room.show" in text
+    assert "Never send or publish anything" in text and "never say anything was posted" in text
+
+
+def test_writing_the_claude_files_is_idempotent_and_keeps_them_out_of_git(project, tmp_path) -> None:
+    repo = tmp_path / "tallymark"
+    (repo / ".git" / "info").mkdir(parents=True)
+    first = project.write_claude(repo)
+    second = project.write_claude(repo)
+    assert json.loads((repo / ".claude" / "settings.local.json").read_text(encoding="utf-8"))["env"]
+    assert (repo / "CLAUDE.md").is_file()
+    assert any("exclude" in line for line in first) and not any("exclude" in line for line in second)
+    lines = (repo / ".git" / "info" / "exclude").read_text(encoding="utf-8").splitlines()
+    assert lines.count(".claude/settings.local.json") == 1 and lines.count("CLAUDE.md") == 1
+    # The Codex half was not written.
+    assert not (repo / ".codex").exists() and not (repo / "AGENTS.md").exists()
+
+
+def test_the_host_flag_picks_the_half_and_defaults_to_codex(project, tmp_path, capsys) -> None:
+    repo = tmp_path / "tallymark"
+    repo.mkdir()
+    assert project.main(["--repo", str(repo)]) == 0
+    assert (repo / ".codex" / "config.toml").is_file() and not (repo / ".claude").exists()
+    other = tmp_path / "other"
+    other.mkdir()
+    assert project.main(["--repo", str(other), "--host", "claude-code"]) == 0
+    out = capsys.readouterr().out
+    assert (other / ".claude" / "settings.local.json").is_file() and not (other / ".codex").exists()
+    assert "claude --plugin-dir" in out and "/wenext" in out
+    third = tmp_path / "third"
+    third.mkdir()
+    assert project.main(["--repo", str(third), "--host", "both"]) == 0
+    assert (third / ".codex" / "config.toml").is_file() and (third / ".claude" / "settings.local.json").is_file()
+    assert project.main(["--repo", str(third), "--host", "claude-code", "--print"]) == 0
+    assert "settings.local.json" in capsys.readouterr().out

@@ -325,7 +325,9 @@ async def test_a_lost_x_session_keeps_the_request_waiting(pool, tenant) -> None:
     seeded = await _seed(pool, tenant)
     await _propose(pool, tenant, seeded)
     await _issue(pool, tenant, seeded)
-    source = DumbXSource(XSessionState(False, None, now(), error="ekran logowania"))
+    source = DumbXSource(
+        XSessionState(False, None, now(), error="ekran logowania", login_wall=True)
+    )
     port = DumbPort()
 
     outcome = await _publisher(pool, tenant, source, port).run_once(now())
@@ -334,6 +336,33 @@ async def test_a_lost_x_session_keeps_the_request_waiting(pool, tenant) -> None:
     assert port.calls == []
     request = await _request(pool, seeded)
     assert request["status"] == "QUEUED" and "brak sesji X" in request["detail"]
+
+
+async def test_an_x_session_that_could_not_be_checked_waits_without_being_called_lost(
+    pool, tenant
+) -> None:
+    """13.10.2026: a timeout and a login wall both kept the request QUEUED, and both said "brak
+    sesji". The request still waits (that is right: nothing was published and the next tick
+    asks again), but the sentence a person reads must not claim a lost session."""
+    seeded = await _seed(pool, tenant)
+    await _propose(pool, tenant, seeded)
+    await _issue(pool, tenant, seeded)
+    source = DumbXSource(
+        XSessionState(
+            False, None, now(), error="czytnik kapsuły nie odpowiedział w czasie", failure="TIMEOUT"
+        )
+    )
+    port = DumbPort()
+
+    outcome = await _publisher(pool, tenant, source, port).run_once(now())
+
+    assert outcome.outcome == OUTCOME_UNAVAILABLE, outcome
+    assert port.calls == []
+    request = await _request(pool, seeded)
+    assert request["status"] == "QUEUED"
+    assert "nie udało się sprawdzić sesji X" in request["detail"]
+    assert "to nie jest wylogowanie" in request["detail"]
+    assert "brak sesji X" not in request["detail"]
 
 
 async def test_a_post_that_is_gone_and_a_post_we_answered_are_skipped(pool, tenant) -> None:

@@ -59,8 +59,11 @@ No shell is needed.
    excerpt, author, created_at, metrics, `dlaczego` (what is missing in the thread, why it matters) and `kat` (the
    suggested angle: answer first; the product only if it is the direct answer, with disclosure). `catalog.describe`
    shows the exact arguments. It returns `pokoj`, the dashboard path of the project's Pokój page.
+   Also save each thread you read and rejected (closed, wrong person, promo, wrong community) with `pomin` true and a
+   one-line `powod` saying why not. The founder sees them on the card under Skipped (N) with your reason. Only for
+   threads you actually read, never for search noise.
 5. Return per item: link, place, age, what the person needs in one sentence, why it matters, the suggested angle, the
-   risk (rules, restricted account). Finish with the full Pokój link: the dashboard base `http://127.0.0.1:3000`
+   risk (rules, restricted account). Say how many you skipped. Finish with the full Pokój link: the dashboard base `http://127.0.0.1:3000`
    (or the port in `WENEXT_DASHBOARD_HOST_PORT`) plus `pokoj`. The next step is the `reply-in-thread` skill, for
    one thread the founder picks.
 6. If nothing qualifies, say "nothing worth joining right now", list what you searched and how old the data was,

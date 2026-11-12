@@ -65,36 +65,16 @@ async def ensure_reddit_thread(
         raise ValueError("tylko post Reddita wymaga wpisu w obserwowanych wątkach")
     bare = opportunity.external_id.removeprefix("t3_")
     store = ObservationStore(pool)
-    community = await store.community_by_key(
+    # QUIET and untouched when it exists: `ObservationStore.ensure_quiet_community` is the one
+    # place that rule lives (the publisher records a thread for a reply nobody recorded with it).
+    community = await store.ensure_quiet_community(
         organization_id=organization_id,
         workspace_id=workspace_id,
         platform=ObservationPlatform.REDDIT.value,
         community_key=opportunity.community,
+        display_name=f"Reddit · {opportunity.community}",
+        access_mode=_ACCESS_MODE.value,
     )
-    if community is None:
-        async with pool.acquire() as conn:
-            await conn.execute(
-                """
-                INSERT INTO communities
-                    (organization_id, workspace_id, platform, community_key, display_name,
-                     access_mode, observe_enabled, poll_interval_seconds,
-                     thread_analysis_enabled)
-                VALUES ($1, $2, $3, $4, $5, $6, false, 600, false)
-                ON CONFLICT (organization_id, workspace_id, platform, community_key) DO NOTHING
-                """,
-                organization_id,
-                workspace_id,
-                ObservationPlatform.REDDIT.value,
-                opportunity.community,
-                f"Reddit · {opportunity.community}",
-                _ACCESS_MODE.value,
-            )
-        community = await store.community_by_key(
-            organization_id=organization_id,
-            workspace_id=workspace_id,
-            platform=ObservationPlatform.REDDIT.value,
-            community_key=opportunity.community,
-        )
     if community is None:  # the insert and the read disagree: refuse rather than guess
         raise LookupError(f"nie udało się zapisać społeczności {opportunity.community}")
 
@@ -126,7 +106,8 @@ async def ensure_reddit_thread(
     digest = hashlib.sha256(json.dumps(seen, sort_keys=True).encode("utf-8")).hexdigest()
     thread = ObservedThread(
         platform=ObservationPlatform.REDDIT,
-        community_key=opportunity.community,
+        # The stored community's own spelling: it may differ in case from the opportunity's.
+        community_key=community.community_key,
         external_id=bare,
         url=opportunity.url,
         title=opportunity.title or opportunity.display_title,

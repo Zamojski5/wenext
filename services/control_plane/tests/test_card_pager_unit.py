@@ -441,7 +441,8 @@ def test_the_header_has_no_results_line_and_the_room_is_one_click_away(tmp_path:
     for word in ("days", "posted", "votes", "removed", "41"):
         assert word not in got["text"], word
     assert got["results"] == 0
-    assert got["room"] == ["Open Room ↗"], "wyniki zostają w Pokoju, jedno kliknięcie"
+    # v9: the dashboard is one small link in the footer ("Open full view"), never a button of the flow.
+    assert got["room"] == ["Open full view ↗"], "pełny widok to jeden mały link w stopce"
     assert got["head"].startswith("3 people are writing right now"), "nagłówek zostaje"
     # No result line either on the card that has nobody on it: only the headline and its sentence.
     nobody = fixture()
@@ -791,10 +792,10 @@ def test_the_card_still_names_every_state_of_a_send_in_one_region() -> None:
     script = _script()
     assert script.count('"room.send_draft"') == 1
     region = script[script.index("function regionInner(") : script.index("function region(")]
-    assert (
-        'st.phase === "idle" ? approval(d, i) : preview(d, false, true) + sendPanel(d, st)'
-        in region
-    )
+    # v11: queued and posted are one quiet line (no reply above it); every other phase keeps the reply and a box.
+    assert 'if (st.phase === "idle") return approval(d, i);' in region
+    assert 'if (st.phase === "queued" || st.phase === "published") return sendPanel(d, st, joined);' in region
+    assert "return preview(d, false, true, joined) + sendPanel(d, st, joined);" in region
 
 
 # ---------------------------------------------------------------------------

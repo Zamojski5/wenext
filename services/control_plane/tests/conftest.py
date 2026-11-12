@@ -34,6 +34,11 @@ import pytest_asyncio
 from control_plane.app import create_app
 from control_plane.auth import SESSIONS, create_operator
 
+#: THE POST A REPLY ANSWERS IS READ FROM THE INTERNET (v11, `opportunities/target_context.py`): the
+#: public mirror of X and the platforms' own pages. A test must never reach them, so the step is OFF
+#: for the whole suite; a test that wants it sets `WENEXT_TARGET_CONTEXT=on` and injects its readers.
+os.environ.setdefault("WENEXT_TARGET_CONTEXT", "off")
+
 #: Set by `tools/dev/run_db_tests.sh`, which brings up a single-use PostgreSQL and applies
 #: every migration before the first test runs.
 DSN_VARIABLE = "WENEXT_TEST_DSN"

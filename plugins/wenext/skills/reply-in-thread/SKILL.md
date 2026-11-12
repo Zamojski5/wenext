@@ -26,6 +26,9 @@ Short, dry, human. Not replying at all is a valid outcome. No shell is needed.
     voice, write plainly and invent nothing.
   - `memory.list` once per `kind` (PREFERENCE, EXPERIENCE) with `community`: apply earlier corrections and say what
     you changed because of them. `memory.search` for product facts.
+  - `playbook.read` once, before you write: the lessons measured on past replies (each with its `n`), the best past
+    texts with their numbers, and the founder's voice rules (`glos`). Follow a lesson where it fits this post, never
+    quote a number that is not in its answer, and with no lessons write from the rules and the voice.
 - To verify a claim before making it: `sources.search`, `sources.read`. Unsure about an argument? `catalog.describe`.
 
 ## Approach

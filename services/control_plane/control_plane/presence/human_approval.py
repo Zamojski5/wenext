@@ -20,6 +20,7 @@ identity check, the thread read and the read-back, and says "opublikowano" only 
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -38,10 +39,19 @@ from control_plane.pilot.publication import (
     PublicationStore,
     draft_sha256,
 )
-from control_plane.pilot.publisher import nudge_issued_revision
+from control_plane.pilot.publisher import nudge_issued_revision, nudge_publish
+from control_plane.presence import batch_plan
 from control_plane.presence import budget as budget_module
 from control_plane.presence.approval import ACTION_OF_CAPABILITY, ACTION_OWN_POST, APPROVED_DECISION
 from control_plane.presence.store import PresenceStore
+
+_LOG = logging.getLogger(__name__)
+
+#: A scheduled request is nudged this many seconds AFTER its moment: the job's own `not_before`
+#: is `now() + delay` on the database's clock and the request's is a moment this process chose, so
+#: a tick that fires a hair early would find `next_queued` empty and leave the request to the
+#: chain's next ten-minute slot.
+NUDGE_SLACK_SECONDS = 2.0
 
 #: What went wrong, as a code a caller can branch on. The route ignores it (it has the sentence
 #: and the status); the card turns it into a state of the button.
@@ -120,6 +130,14 @@ async def revision_row(
         )
 
 
+def _get(row: Any, key: str) -> Any:
+    """A column of the proposal row, or `None` for a row that does not carry it (a test's)."""
+    try:
+        return row[key]
+    except (KeyError, IndexError):
+        return None
+
+
 def payload_of(row: Any) -> dict[str, Any]:
     payload = row["payload"]
     if isinstance(payload, str):
@@ -169,8 +187,18 @@ async def approve_and_queue(
     signer: HumanSigner | None,
     reason: str,
     expected_payload_hash: str | None = None,
+    not_before: datetime | None = None,
 ) -> HumanApproval:
-    """Record the person's consent for `row` and queue it for the publisher, or refuse."""
+    """Record the person's consent for `row` and queue it for the publisher, or refuse.
+
+    `not_before` is for "Send all" (`tools/card_batch.py`): when the request may go out. Given,
+    the pace is checked AT THAT MOMENT against everything committed (`batch_plan.slot_blocked`,
+    under the same lock) instead of against "now", where every queued request counts as a
+    publication of this hour and the second reply of a spaced-out batch would be refused for the
+    first one's sake. The limits are the same ones; only the moment they are asked about differs.
+    The request carries the moment (`next_queued` honours it), and the publisher is nudged AT it,
+    not now.
+    """
     revision_id = row["revision_id"]
     payload = payload_of(row)
     ensure_waiting(row, expected_payload_hash)
@@ -197,18 +225,51 @@ async def approve_and_queue(
     publication = PublicationStore(pool)
     own_post = ACTION_OF_CAPABILITY.get(str(payload.get("action_type"))) == ACTION_OWN_POST
 
+    now = datetime.now(UTC)
     async with pool.acquire() as gate, gate.transaction():
         key = f"presence-budget:{project_id}"
         await gate.execute("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))", key)
-        spent = await budget_module.spent(
-            gate,
-            organization_id=organization_id,
-            project_id=project_id,
-            accounts=delegation.scope.accounts,
-            limits=budget_module.effective_limits(delegation),
-            now=datetime.now(UTC),
-        )
-        blocked = spent.own_post_blocked() if own_post else spent.publication_blocked()
+        limits = budget_module.effective_limits(delegation)
+        # WHOSE publication it is: the limits can be per account (v11), and the proposal's
+        # account is read from the row the server fetched, never from what the card sent.
+        account_id = _get(row, "social_account_id")
+        platform = str(_get(row, "platform") or "") or None
+        if limits.per_account and account_id is None:
+            # FAIL CLOSED: a pace per account cannot be asked about an account nobody named, and
+            # "no account, so no per-account limit" would be a way round every one of them.
+            raise HumanApprovalRefused(
+                409,
+                "budżet wyczerpany, nie wiadomo, z którego konta idzie ta publikacja, a limity "
+                "tego zakresu są osobne dla każdego konta",
+                code=REFUSED_BUDGET,
+            )
+        if not_before is None:
+            spent = await budget_module.spent(
+                gate,
+                organization_id=organization_id,
+                project_id=project_id,
+                accounts=delegation.scope.accounts,
+                limits=limits,
+                now=now,
+            )
+            blocked = (
+                spent.own_post_blocked(account_id)
+                if own_post
+                else spent.publication_blocked(account_id)
+            )
+        else:
+            blocked = await batch_plan.slot_blocked(
+                gate,
+                organization_id=organization_id,
+                project_id=project_id,
+                accounts=delegation.scope.accounts,
+                limits=limits,
+                own_post=own_post,
+                at=max(not_before, now),
+                now=now,
+                account_id=account_id,
+                platform=platform,
+            )
         if blocked is not None:
             raise HumanApprovalRefused(409, f"budżet wyczerpany, {blocked}", code=REFUSED_BUDGET)
         try:
@@ -253,6 +314,7 @@ async def approve_and_queue(
             draft_sha256=draft_sha256(str(payload.get("text_and_media") or "")),
             target_external_id=str(payload.get("target_external_id")),
             target_url=str(payload.get("target_url")),
+            not_before=not_before,
             conn=gate,
         )
 
@@ -260,12 +322,47 @@ async def approve_and_queue(
     # the draft is minutes old and the person is looking at the screen, so one publisher tick now
     # rather than the chain's next ten-minute slot. After the transaction, never inside it: a
     # nudge that failed must not roll back a consent that was given.
-    await nudge_issued_revision(
-        PostgresJobTransport(JobStore(pool), organization_id=organization_id),
-        organization_id=organization_id,
-        workspace_id=workspace_id,
-        revision_id=approved.id,
-    )
+    port = PostgresJobTransport(JobStore(pool), organization_id=organization_id)
+    delay = (not_before - now).total_seconds() if not_before is not None else 0.0
+    if delay > 0:
+        await _nudge_at(
+            port,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            revision_id=approved.id,
+            delay_seconds=delay,
+        )
+    else:
+        await nudge_issued_revision(
+            port,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            revision_id=approved.id,
+        )
     return HumanApproval(
         revision_id=approved.id, request_id=request_row.id, decision_id=decision.id
     )
+
+
+async def _nudge_at(
+    port: Any,
+    *,
+    organization_id: UUID,
+    workspace_id: UUID,
+    revision_id: UUID,
+    delay_seconds: float,
+) -> None:
+    """One publisher tick at the moment a scheduled request may go out, so it is not left to the
+    chain's next ten-minute slot. Its own key (`scheduled:<revision>`): the immediate nudge's key
+    belongs to `nudge_issued_revision`. A failed nudge is not the caller's failure: the request is
+    queued either way and the chain picks it up when its moment has come (`next_queued`)."""
+    try:
+        await nudge_publish(
+            port,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            key=f"scheduled:{revision_id}",
+            delay_seconds=delay_seconds + NUDGE_SLACK_SECONDS,
+        )
+    except Exception:
+        _LOG.exception("nie udało się zlecić tiku na termin dla rewizji %s", revision_id)

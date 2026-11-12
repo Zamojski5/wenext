@@ -128,6 +128,17 @@ def verify(
     try:
         data = _fetch_json_version(host, port, timeout)
     except (urllib.error.URLError, OSError, TimeoutError) as exc:
+        reason = getattr(exc, "reason", exc)
+        if isinstance(exc, TimeoutError) or isinstance(reason, TimeoutError):
+            # A dead process REFUSES the connection; one that lets it in and says nothing is
+            # alive and stuck. The two need opposite handling (a stale file is deleted and the
+            # browser started again, a hung browser must be killed first), and the 13.10.2026
+            # capsule-x hang was read for hours as the first although it was the second.
+            raise StaleDevToolsPort(
+                f"{file} wskazuje port {port}, który nie odpowiada na /json/version w "
+                f"{timeout:g} s ({exc}). Port jest otwarty, a przeglądarka milczy: wisi (żyje i "
+                "nic nie robi), a nie padła. Plik nie jest tu stale, stale jest sam proces."
+            ) from exc
         raise StaleDevToolsPort(
             f"{file} wskazuje port {port}, który nie odpowiada na /json/version ({exc}). "
             "To jest klasyczny stale port po kill -9 — plik zostaje, proces nie żyje."

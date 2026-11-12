@@ -205,11 +205,11 @@ def test_the_four_states_are_exactly_the_ones_the_brief_names() -> None:
 
 OPPORTUNITY_KEYS = {
     "id", "platforma", "spolecznosc", "tytul", "fragment", "autor", "url", "utworzono", "wynik",
-    "komentarze", "dlaczego", "kat", "stan", "szkic",
+    "komentarze", "dlaczego", "kat", "stan", "szkic", "cel",
 }  # fmt: skip
 DRAFT_KEYS = {
     "revision_id", "okazja_id", "platforma", "konto", "spolecznosc", "rodzaj", "tytul", "tekst",
-    "w_odpowiedzi_na", "stan", "wygasa", "odcisk",
+    "w_odpowiedzi_na", "stan", "wygasa", "odcisk", "cel", "cytat", "konto_awatar",
 }  # fmt: skip
 
 

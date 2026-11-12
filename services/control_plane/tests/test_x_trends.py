@@ -334,6 +334,33 @@ async def test_another_account_in_the_browser_reads_nothing(pool, tenant) -> Non
     assert source.reads == [] and source.closed == 1
 
 
+async def test_a_session_that_could_not_be_checked_skips_the_hour_without_calling_it_lost(
+    pool, tenant
+) -> None:
+    """13.10.2026: a timeout and a lost session both end the hour's collection (nothing is read
+    through a browser nobody could vouch for), but the recorded reason must not say the browser is
+    not logged in when nobody saw that."""
+    seeded = await _seed(pool, tenant)
+    unknown = XSessionState(
+        False, None, now(), error="czytnik kapsuły nie odpowiedział w czasie", failure="TIMEOUT"
+    )
+    source = DumbXSource(unknown, home=_page())
+    handlers, _built = _handlers(pool, tenant, source)
+
+    result = await handlers.collect_once(seeded["project"], now())
+
+    assert result.outcome == OUTCOME_SKIPPED and source.reads == []
+    assert "nie udało się sprawdzić sesji X" in result.detail
+    assert "nie jest zalogowana" not in result.detail
+
+    wall = DumbXSource(
+        XSessionState(False, None, now(), error="ekran logowania", login_wall=True), home=_page()
+    )
+    handlers, _built = _handlers(pool, tenant, wall)
+    lost = await handlers.collect_once(seeded["project"], now())
+    assert lost.outcome == OUTCOME_SKIPPED and "nie jest zalogowana" in lost.detail
+
+
 async def test_x_refusing_the_client_ends_the_hour(pool, tenant) -> None:
     seeded = await _seed(pool, tenant)
     await _add_watch(pool, tenant, seeded)

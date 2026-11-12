@@ -72,6 +72,10 @@ Keep a conversation only if a helpful reply from this founder would be genuinely
   (`https://www.reddit.com/r/<name>/about/rules`) with `browser.inspect` or `sources.read` for the threads you
   draft for. Say which you could not read. Never guess.
 - Returning few is fine. Returning zero is a valid, honest answer (see the end).
+- Record what you dropped. Every thread you actually read and then rejected goes in with `opportunities.mark`,
+  `pomin` true and a one-line `powod` saying why not ("thread closed", "asks for a hire, not help", "promo thread").
+  The founder sees these on the card under Skipped (N) with your reason, so "I skipped it because..." is something
+  they can check. Do this only for threads you read, never for search noise.
 
 ## Step 4: draft the best three, then save them all
 Order matters: draft first, so each opportunity can carry its draft.
@@ -117,7 +121,8 @@ Hand back, in the founder's language, plain words, no ids or tool names:
 3. What to click: open the link, read the drafts, approve the ones you like. Add: "Nothing is published until you
    click. Ask me how it went in two days and I will measure it."
 
-Then the full Pokój link on its own line. Then at most one more sentence for anything you could not do or cut.
+Then the full Pokój link on its own line. Then at most one more sentence for anything you could not do or cut, and the
+number you skipped with reasons ("skipped 4, listed under Skipped on the card").
 Never say "published", "sent" or "posted": say "saved as a draft".
 
 If you found nothing: say "no one worth answering right now", list in one or two lines what you searched and how

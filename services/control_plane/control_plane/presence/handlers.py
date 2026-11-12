@@ -748,12 +748,21 @@ class PresenceHandlers:
             if limits.model_turns_per_day is not None
             else f"{spent.model_turns_today}, bez limitu"
         )
-        blocked = spent.publication_blocked()
         deadline = (
             f"; ważne do {delegation.expires_at:%Y-%m-%d %H:%M} UTC"
             if delegation.expires_at is not None
             else ""
         )
+        if limits.per_account:
+            # v11: LIMITS PER ACCOUNT. The agent plans by what is left on EACH account (an X reply
+            # is not waiting for Reddit's hour), so the mandate says it account by account.
+            return (
+                f"Zakres powierzenia: {actions}. Limity są osobne dla każdego konta, "
+                f"odpowiedzi i własne posty liczone osobno. {spent.accounts_sentence()}; "
+                f"tury modelu {turns}{deadline}."
+                + (f" Teraz: {spent.accounts_blocked()}." if spent.accounts_blocked() else "")
+            )
+        blocked = spent.publication_blocked()
         return (
             f"Zakres powierzenia: {actions}. W ostatniej dobie: publikacje "
             f"{spent.publications_today} z {limits.publications_per_day} "

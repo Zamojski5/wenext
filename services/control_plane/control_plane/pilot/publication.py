@@ -40,6 +40,10 @@ PLATFORM = "REDDIT"
 #: How long a recorded consent stays grantable. Long enough for a queue paced at one comment an
 #: hour; short enough that a draft nobody published for three days needs a fresh look.
 CONSENT_TTL = timedelta(hours=72)
+#: A SCHEDULED request (one with a `not_before`, "Send all") that goes back to the queue with a
+#: reason is not due again for this long: it is looked at at the publisher's next ten-minute
+#: slot, and in the meantime it is not the head of the queue (`next_queued`). See `set_status`.
+SCHEDULED_RETRY_AFTER = timedelta(minutes=10)
 
 REQUEST_QUEUED = "QUEUED"
 REQUEST_PUBLISHING = "PUBLISHING"
@@ -738,6 +742,7 @@ class PublicationStore:
         target_external_id: str,
         target_url: str,
         kind: str = KIND_REPLY,
+        not_before: datetime | None = None,
         conn: asyncpg.Connection | None = None,
     ) -> PublicationRequest:
         """The same queue, entered from a delegation instead of a pilot run (P4).
@@ -751,6 +756,11 @@ class PublicationStore:
         default that matches history is the one that cannot silently reclassify old callers. An
         own post has to say so, which is the same shape as the rest of this milestone: the wider
         permission is the one you ask for by name.
+
+        `not_before` is the moment before which the publisher must not take the request
+        (`next_queued` skips it until then). NULL, the default, is "as soon as the publisher
+        gets to it", which is every caller before v11; "Send all" (`presence/batch_plan.py`)
+        spaces a batch out with it.
         """
         if kind not in REQUEST_KINDS:
             raise ValueError(f"rodzaj {kind!r} poza listą {REQUEST_KINDS}")
@@ -758,8 +768,8 @@ class PublicationStore:
             INSERT INTO publication_requests
                 (organization_id, workspace_id, project_id, delegation_id, proposal_revision_id,
                  approval_decision_id, position, status, consent_source, draft_sha256,
-                 target_external_id, target_url, kind)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                 target_external_id, target_url, kind, not_before)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
             RETURNING {_REQUEST_COLUMNS}
             """
         args = (
@@ -776,6 +786,7 @@ class PublicationStore:
             target_external_id,
             target_url,
             kind,
+            not_before,
         )
         if conn is not None:
             return _request_of(await conn.fetchrow(sql, *args))
@@ -810,18 +821,33 @@ class PublicationStore:
         published_at: datetime | None = None,
         not_before: datetime | None = None,
     ) -> PublicationRequest:
+        """Move a request to `status`.
+
+        A SCHEDULED request (`not_before` already set, "Send all") that returns to QUEUED WITH A
+        REASON (`detail`) and no new `not_before` of its own is pushed `SCHEDULED_RETRY_AFTER`
+        later: the session was down, the page would not load, the pace was spent. Without it the
+        request would stay the head of the queue (`next_queued` takes the youngest due thread) and
+        a reply waiting for the X session would hold back a Reddit reply whose session is fine.
+        A request that was never scheduled keeps `not_before` NULL, as before.
+        """
         if status not in REQUEST_STATUSES:
             raise ValueError(f"status {status!r} poza listą {REQUEST_STATUSES}")
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 f"""
                 UPDATE publication_requests
-                   SET status = $2,
-                       detail = COALESCE($3, detail),
+                   SET status = $2::text,
+                       detail = COALESCE($3::text, detail),
                        intent_id = COALESCE($4, intent_id),
                        attempt_id = COALESCE($5, attempt_id),
                        published_at = COALESCE($6, published_at),
-                       not_before = COALESCE($7, not_before),
+                       not_before = CASE
+                           WHEN $2::text = 'QUEUED' AND $3::text IS NOT NULL
+                                AND $7::timestamptz IS NULL AND not_before IS NOT NULL
+                           THEN greatest(
+                               not_before, now() + make_interval(secs => $8::double precision))
+                           ELSE COALESCE($7::timestamptz, not_before)
+                       END,
                        last_checked_at = now()
                  WHERE id = $1
                 RETURNING {_REQUEST_COLUMNS}
@@ -833,6 +859,7 @@ class PublicationStore:
                 attempt_id,
                 published_at,
                 not_before,
+                SCHEDULED_RETRY_AFTER.total_seconds(),
             )
         if row is None:
             raise LookupError(f"nie ma wniosku publikacji {request_id}")
@@ -887,6 +914,22 @@ class PublicationStore:
                 )
             )
 
+    async def note_target_gone(self, request: PublicationRequest) -> None:
+        """The platform says the post this request answers is not there (v11): record it on the
+        conversation's opportunity, if the project has one, so the drafts still waiting under it
+        expire (`opportunities/freshness.py`). A request of the pilot has no project: nothing."""
+        if request.project_id is None:
+            return
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE project_opportunities SET gone_at = now(), updated_at = now() "
+                "WHERE organization_id = $1 AND project_id = $2 AND external_id = $3 "
+                "AND gone_at IS NULL",
+                request.organization_id,
+                request.project_id,
+                request.target_external_id,
+            )
+
     async def stop_all_queued(self, *, organization_id: UUID, detail: str) -> int:
         async with self._pool.acquire() as conn:
             result = await conn.execute(
@@ -923,6 +966,27 @@ class PublicationStore:
                     organization_id,
                     since,
                 )
+            )
+
+    async def account_pace(
+        self, *, request: PublicationRequest, limits: Any, accounts: Any, now: datetime
+    ) -> str | None:
+        """Why the pace of the request's ACCOUNT holds it (limits per account, v11), or `None`.
+
+        The rules and the count are `presence/budget.py` (`pace_blocked`); this only lends it a
+        connection. Imported here and not at the top because that module imports this one.
+        """
+        from control_plane.presence.budget import pace_blocked
+
+        async with self._pool.acquire() as conn:
+            return await pace_blocked(
+                conn,
+                organization_id=request.organization_id,
+                revision_id=request.proposal_revision_id,
+                own_post=request.kind == KIND_OWN_POST,
+                limits=limits,
+                accounts=list(accounts),
+                now=now,
             )
 
     async def published_on_thread(self, *, organization_id: UUID, thread_url: str) -> bool:

@@ -29,14 +29,11 @@ import re
 from typing import Annotated, Any
 from uuid import UUID
 
-from community_os_contracts.execution import ActionProposalState, ApprovalHashInput
-from community_os_contracts.transitions import IllegalTransition
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from control_plane.approval.store import ApprovalStore, ApprovalStoreError
 from control_plane.auth import OperatorSession, current_operator, pool_for
-from control_plane.pilot.publication import join_media, split_media
+from control_plane.pilot.publication import split_media
 from control_plane.presence.approval import ACTION_OF_CAPABILITY, ACTION_OWN_POST
 from control_plane.presence.human_approval import (
     HumanApprovalRefused,
@@ -45,6 +42,7 @@ from control_plane.presence.human_approval import (
     payload_of,
     revision_row,
 )
+from control_plane.presence.human_revision import revise_into_new_revision
 from control_plane.presence.store import PresenceStore
 from control_plane.tools.cards import (
     DRAFT_NEW,
@@ -253,83 +251,22 @@ async def revise_revision(
     row = await _revision_row(request, operator, workspace_id, project_id, revision_id)
     payload = _payload_of(row)
     pool = await pool_for(request.app)
-    approvals = ApprovalStore(pool)
 
-    consented = str(payload.get("text_and_media") or "")
-    _, media = split_media(consented)
-    corrected = body.text.strip()
-    # The card shows the text without the image line (27.09), so a correction arrives without
-    # it and the image the agent attached stays attached. Another image is another draft.
-    text = (
-        join_media(corrected, media)
-        if media is not None and split_media(corrected)[1] is None
-        else corrected
-    )
-    if text == consented.strip():
-        raise HTTPException(status_code=409, detail="poprawka nie zmienia treści")
-    shown_text, shown_media = split_media(text)
-
-    new_input = _hash_input_with_text(payload, text)
-    actor = f"operator:{operator.operator_id}"
-    state = str(row["state"])
+    # SAMA POPRAWKA JEST W `presence/human_revision.py`, bo tę samą drogę przechodzi karta w
+    # agencie człowieka (`tools/card_actions.py`). Ta trasa dokłada to, co jest jej własne:
+    # bramkę projektu, operatora z sesji, odpowiedź HTTP i kartę w odpowiedzi.
     try:
-        if state == ActionProposalState.APPROVED.value:
-            # PO ZGODZIE edycja ma swoją własną, opisaną ścieżkę: poprzednia rewizja idzie w
-            # SUPERSEDED, a zgoda, która jej dotyczyła, przestaje cokolwiek autoryzować.
-            _, successor = await approvals.edit_into_new_revision(
-                revision_id=revision_id,
-                organization_id=operator.organization_id,
-                workspace_id=workspace_id,
-                new_hash_input=new_input,
-                actor_ref=actor,
-            )
-            ready = await approvals.move_revision(
-                successor.id,
-                organization_id=operator.organization_id,
-                workspace_id=workspace_id,
-                target=ActionProposalState.READY_FOR_APPROVAL,
-                actor_ref=actor,
-            )
-        else:
-            # PRZED ZGODĄ nie ma strzałki do SUPERSEDED (L2775: jedyne wejście do tego stanu to
-            # APPROVED). Poprawka jest więc tym, czym naprawdę jest: człowiek odrzuca wersję
-            # agenta i pisze własną jako KOLEJNĄ rewizję tej samej propozycji. Historia zostaje
-            # w komplecie, bo to ona jest jedynym materiałem do oceny pracy agenta.
-            await approvals.move_revision(
-                revision_id,
-                organization_id=operator.organization_id,
-                workspace_id=workspace_id,
-                target=ActionProposalState.REJECTED,
-                actor_ref=actor,
-            )
-            ready = await approvals.record_revision(
-                organization_id=operator.organization_id,
-                workspace_id=workspace_id,
-                proposal_id=row["proposal_id"],
-                revision_no=int(row["revision"]) + 1,
-                hash_input=new_input,
-                state=ActionProposalState.READY_FOR_APPROVAL,
-                # OKNO ZGODY SIĘ NIE PRZEDŁUŻA (L5539): poprawka jest poprawką tej samej
-                # propozycji, a nie nową sprawą z nowym terminem.
-                expires_at=row["expires_at"],
-            )
-    except ApprovalStoreError as exc:
-        raise HTTPException(status_code=409, detail=f"poprawka nie przeszła: {exc}") from exc
-    except IllegalTransition as exc:
-        # POWTÓRZONA POPRAWKA, czyli drugie kliknięcie na karcie, której ekran jeszcze nie
-        # odświeżył. Rewizja stoi już w REJECTED albo SUPERSEDED, a maszyna stanów nie ma z nich
-        # strzałki; `IllegalTransition` nie dziedziczy po `ApprovalStoreError`, więc lądowało
-        # wyżej jako 500 z pełnym śladem wyjątku w logu. Nic się przy tym nie psuło i nic nie
-        # ginęło, ale 500 znaczy „serwer się wywrócił", a tu wywrócił się tylko człowiek w
-        # kliknięcie (zgłoszenie wenext-ce, odtworzenie: e2e
-        # `clicking_the_stale_correction_again_makes_no_second_proposal`).
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "ta wersja szkicu nie jest już aktualna: ktoś ją w międzyczasie poprawił albo "
-                "zatwierdził. Odśwież rozmowę i popraw najnowszą wersję."
-            ),
-        ) from exc
+        revised = await revise_into_new_revision(
+            pool,
+            organization_id=operator.organization_id,
+            workspace_id=workspace_id,
+            row=row,
+            text=body.text,
+            actor_ref=f"operator:{operator.operator_id}",
+        )
+    except HumanApprovalRefused as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+    shown_text, shown_media = split_media(revised.text)
 
     # CZY W OGÓLE JEST DOKĄD TO WYDAĆ. Karta obiecywała „opublikuj" ZAWSZE, bo `delegation_allows`
     # stało tu jako `True`, a przycisk powstawał bez pytania o powierzenie. W projekcie bez
@@ -348,7 +285,7 @@ async def revise_revision(
         payload=payload,
     )
     card = draft_card(
-        revision=str(ready.id),
+        revision=str(revised.revision_id),
         # TYTUŁ, A NIE IDENTYFIKATOR CELU. Stało tu `target_external_id`, czyli `t3_e2edraft`, i
         # ten sam napis jechał w `tytul` oraz w `spolecznosc`: na ekranie stał dwa razy
         # identyfikator zamiast tytułu. Własny post ma prawdziwy tytuł w treści (0023), a
@@ -367,7 +304,7 @@ async def revise_revision(
         # karta nie miała ŻADNEGO przycisku i człowiek nie mógł poprawić szkicu drugi raz, choć
         # poprawianie powierzenia nie wymaga (zmierzone przez wenext-ce na e2e, 21.09).
         actions=draft_actions(
-            str(ready.id),
+            str(revised.revision_id),
             allowed=may_publish,
             workspace_id=workspace_id,
             project_id=project_id,
@@ -458,30 +395,3 @@ def _draft_title(payload: dict[str, Any], text: str, *, fallback: str = "Odpowie
         if title.strip():
             return title.strip()
     return fallback
-
-
-def _hash_input_with_text(payload: dict[str, Any], text: str) -> ApprovalHashInput:
-    """Ten sam odcisk zgody, z jedną zmienioną rzeczą: treścią.
-
-    Pola przepisane z payloadu poprzedniej rewizji, bo zgoda ma dotyczyć TEJ SAMEJ akcji pod tym
-    samym celem. Gdyby cokolwiek poza tekstem powstawało tu na nowo, poprawka byłaby inną akcją
-    udającą tę samą.
-    """
-    from community_os_contracts.enums import SemanticCapability
-
-    return ApprovalHashInput(
-        organization=UUID(str(payload["organization"])),
-        workspace=UUID(str(payload["workspace"])),
-        assignment_version=UUID(str(payload["assignment_version"])),
-        account=UUID(str(payload["account"])),
-        platform=str(payload["platform"]),
-        action_type=SemanticCapability(str(payload["action_type"])),
-        target_external_id=str(payload["target_external_id"]),
-        target_url=str(payload["target_url"]),
-        source_fingerprint=str(payload["source_fingerprint"]),
-        text_and_media=text,
-        intelligence_profile_version=UUID(str(payload["intelligence_profile_version"])),
-        plan_version=UUID(str(payload["plan_version"])),
-        memory_snapshot=UUID(str(payload["memory_snapshot"])),
-        adapter_version=str(payload["adapter_version"]),
-    )

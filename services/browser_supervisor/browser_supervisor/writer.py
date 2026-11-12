@@ -27,6 +27,7 @@ Three outcomes, three exception types, because the caller has to treat them diff
 
 from __future__ import annotations
 
+import contextlib
 import re
 import time
 from collections.abc import Callable
@@ -34,6 +35,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Protocol
 from urllib.parse import urlsplit, urlunsplit
+
+from community_os_contracts.session_verdict import SessionVerdict, verdict_of
 
 #: The header carrying the writer's token: a different secret than the reader's, so a process that
 #: may read (`api`'s observer) is not thereby a process that may write.
@@ -350,6 +353,78 @@ def _lower(text: str | None) -> str:
     return (text or "").strip().lower()
 
 
+#: The refusal that says the account IS NOT SIGNED IN, and the one that says nobody could tell.
+#: Until 13.10.2026 both were `strona nie pokazuje zalogowanego konta`, produced by a 5 s wait for
+#: one element: the card showed the account as connected (the reader asks `/api/me.json`, which
+#: answered 200 with the account two seconds earlier) while this actuator refused and the request
+#: ended SKIPPED for good, its single-use consent spent. A missing element after a bounded wait is
+#: not proof of a logout, and `community_os_contracts.session_verdict` says so for every platform:
+#: LOGGED_OUT needs the platform's own sign of it (here, the old interface's "log in" link where the
+#: account name should be), everything else is UNKNOWN and says so in its sentence.
+NOT_LOGGED_IN = "strona nie pokazuje zalogowanego konta"
+ACCOUNT_NOT_READ = (
+    "nie odczytano konta ze strony Reddita: element z nazwą zalogowanego konta nie pojawił się "
+    "mimo drugiego podejścia (ponowne załadowanie strony), a strona nie pokazała przycisku "
+    "logowania. To nie jest potwierdzone wylogowanie (strona mogła być wolna albo zmienić układ); "
+    "nic nie wysłano"
+)
+#: What the old interface shows where the account name should be when nobody is logged in: the
+#: platform's own sign of a logout, and the only one this module knows (lower case, as `_lower`).
+LOGIN_LINK_TEXTS = frozenset({"login", "log in or sign up", "log in"})
+
+
+def _unseen_account_message(shown: str) -> str:
+    """The refusal for an account that is not on the page, by the ONE rule of `session_verdict`:
+    the account not seen is a logout only with the platform's own sign of it (a login link where
+    the name should be), everything else is UNKNOWN and says so."""
+    verdict = verdict_of(account_seen=False, logged_out_proof=shown in LOGIN_LINK_TEXTS)
+    return NOT_LOGGED_IN if verdict is SessionVerdict.LOGGED_OUT else ACCOUNT_NOT_READ
+
+
+#: How long the account element is waited for. It was a fixed 5 s; `get_attribute` and `wait_for`
+#: return the moment the element is there, so a longer ceiling costs nothing on a page that is
+#: fine and only matters on one that hydrates slowly. `MIN`: whatever the act's budget says, the
+#: first look gets at least what it always had.
+ACCOUNT_WAIT_S = 12.0
+ACCOUNT_MIN_WAIT_S = 5.0
+#: A second look reloads the page, so it needs room: a reload and another wait.
+ACCOUNT_RELOAD_S = 10.0
+ACCOUNT_SECOND_LOOK_MIN_LEFT_S = 9.0
+
+
+def _first_wait_ms(deadline: float, *, clock: Callable[[], float] = time.monotonic) -> int:
+    """The first wait for the account: up to `ACCOUNT_WAIT_S`, within the act's budget, never
+    less than `ACCOUNT_MIN_WAIT_S`."""
+    left = deadline - clock()
+    return int(max(ACCOUNT_MIN_WAIT_S, min(ACCOUNT_WAIT_S, left)) * 1000)
+
+
+def _second_look_at_account(
+    page: Any,
+    read: Callable[[int], str | None],
+    *,
+    deadline: float,
+    clock: Callable[[], float] = time.monotonic,
+) -> str:
+    """ONE more look at the account, after a reload, when the first came back empty.
+
+    Safe at this point: nothing has been typed or clicked, so a reload costs time and nothing else.
+    It is made only when the act's budget still has room for it (`deadline`, a clock value), so a
+    slow page cannot stretch the act beyond what the control plane waits for (75 s, after which the
+    outcome is UNKNOWN). A page without `reload` (a test double) gets no second look.
+    """
+    left = deadline - clock()
+    reload = getattr(page, "reload", None)
+    if reload is None or left < ACCOUNT_SECOND_LOOK_MIN_LEFT_S:
+        return ""
+    with contextlib.suppress(Exception):
+        reload(
+            wait_until="load",
+            timeout=int(max(1.0, min(ACCOUNT_RELOAD_S, left - ACCOUNT_MIN_WAIT_S)) * 1000),
+        )
+    return _lower(read(_first_wait_ms(deadline, clock=clock)))
+
+
 def _body_text(page, *, timeout_ms: int = 3000) -> str:
     """Tekst strony albo pusty napis. Nigdy nie rzuca: wołamy go po to, żeby ROZPOZNAĆ odmowę,
     więc jego własna porażka nie może zastąpić odmowy czymś innym."""
@@ -553,6 +628,7 @@ class CdpCommentActuator:
         if not account or not account.strip():
             raise WriteRefused("brak oczekiwanego konta")
         deadline_ms = int(timeout_s * 1000)
+        act_deadline = time.monotonic() + timeout_s
 
         driver = self._driver()
         try:
@@ -582,12 +658,16 @@ class CdpCommentActuator:
                     )
 
                 # 1. Konto na stronie, tak samo jak przy komentarzu: twardy warunek.
-                shown = _lower(
-                    _first_text(page.locator("#header-bottom-right span.user a"), timeout_ms=5_000)
-                )
+                def read_account(ms: int) -> str | None:
+                    user = page.locator("#header-bottom-right span.user a")
+                    return _first_text(user, timeout_ms=ms)
+
+                shown = _lower(read_account(_first_wait_ms(act_deadline)))
+                if not shown:
+                    shown = _second_look_at_account(page, read_account, deadline=act_deadline)
                 if shown != account.strip().lower():
-                    if not shown or shown in {"login", "log in or sign up", "log in"}:
-                        raise WriteRefused("strona nie pokazuje zalogowanego konta")
+                    if not shown or shown in LOGIN_LINK_TEXTS:
+                        raise WriteRefused(_unseen_account_message(shown))
                     raise WriteBlocked(
                         f"strona pokazuje konto {shown!r}, oczekiwano {account!r}: sesja w kapsule "
                         "należy do innego konta, kolejka stoi"
@@ -681,6 +761,7 @@ class CdpCommentActuator:
         if not account or not account.strip():
             raise CommentRefused("brak oczekiwanego konta")
         deadline_ms = int(timeout_s * 1000)
+        act_deadline = time.monotonic() + timeout_s
         wanted = account.strip().lower()
 
         driver = self._driver()
@@ -711,14 +792,19 @@ class CdpCommentActuator:
                     )
 
                 # 1. KONTO. Twardy warunek, tak samo jak na starym interfejsie, tylko z atrybutu.
-                shown = _lower(
-                    _first_attribute(
-                        page.locator(WWW_CURRENT_USER), "display-name", timeout_ms=5_000
+                def read_account(ms: int) -> str | None:
+                    return _first_attribute(
+                        page.locator(WWW_CURRENT_USER), "display-name", timeout_ms=ms
                     )
-                )
+
+                shown = _lower(read_account(_first_wait_ms(act_deadline)))
+                if not shown:
+                    shown = _second_look_at_account(page, read_account, deadline=act_deadline)
                 if shown != wanted:
                     if not shown:
-                        raise CommentRefused("strona nie pokazuje zalogowanego konta")
+                        # Nowy interfejs nie ma tu znaku wylogowania, który byłby DOWODEM, więc
+                        # brak elementu nie może być nazwany wylogowaniem (ACCOUNT_NOT_READ).
+                        raise CommentRefused(_unseen_account_message(shown))
                     raise CommentBlocked(
                         f"strona pokazuje konto {shown!r}, oczekiwano {account!r}: sesja w "
                         "kapsule należy do innego konta, kolejka stoi"
@@ -791,6 +877,7 @@ class CdpCommentActuator:
         if not account or not account.strip():
             raise CommentRefused("brak oczekiwanego konta")
         deadline_ms = int(timeout_s * 1000)
+        act_deadline = time.monotonic() + timeout_s
 
         driver = self._driver()
         try:
@@ -823,12 +910,16 @@ class CdpCommentActuator:
                     )
 
                 # 1. The page must show OUR account, or nothing happens (the hard condition).
-                shown = _lower(
-                    _first_text(page.locator("#header-bottom-right span.user a"), timeout_ms=5_000)
-                )
+                def read_account(ms: int) -> str | None:
+                    user = page.locator("#header-bottom-right span.user a")
+                    return _first_text(user, timeout_ms=ms)
+
+                shown = _lower(read_account(_first_wait_ms(act_deadline)))
+                if not shown:
+                    shown = _second_look_at_account(page, read_account, deadline=act_deadline)
                 if shown != account.strip().lower():
-                    if not shown or shown in {"login", "log in or sign up", "log in"}:
-                        raise CommentRefused("strona nie pokazuje zalogowanego konta")
+                    if not shown or shown in LOGIN_LINK_TEXTS:
+                        raise CommentRefused(_unseen_account_message(shown))
                     raise CommentBlocked(
                         f"strona pokazuje konto {shown!r}, oczekiwano {account!r}: sesja w kapsule "
                         "należy do innego konta, kolejka stoi"

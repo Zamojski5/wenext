@@ -162,7 +162,16 @@ async def x_session(
         "handle": state.handle,
         "known_account": bool(state.handle and state.handle.lower() in known),
         "checked_at": state.checked_at.isoformat(),
-        "message": state.error if not state.logged_in else f"Zalogowano jako @{state.handle}.",
+        # THE THIRD ANSWER (13.10.2026): `logged_in: false` is also what a timeout looks like, so
+        # the verdict travels next to it. `LOGGED_OUT` is the only one that means "sign in".
+        "verdict": state.verdict.value,
+        "message": (
+            f"Zalogowano jako @{state.handle}."
+            if state.logged_in
+            else state.error
+            if not state.unknown
+            else f"Nie udało się sprawdzić sesji X (to nie jest wylogowanie): {state.error}"
+        ),
     }
 
 

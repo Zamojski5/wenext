@@ -196,7 +196,7 @@ async def test_a_host_agent_session_end_to_end(pool, tenant, tmp_path: Path) -> 
             if tool.get("_meta", {}).get("ui", {}).get("visibility") == ["app"]
         }
         assert app_only == APP_ONLY_TOOLS
-        assert names - app_only == PLUGIN_TOOLS and len(names - app_only) == 47
+        assert names - app_only == PLUGIN_TOOLS and len(names - app_only) == 48
         assert "drafts.publish" not in names
 
         # -- an excluded tool is a protocol error, not content -----------------------------------

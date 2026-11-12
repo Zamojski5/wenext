@@ -43,6 +43,17 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
+from community_os_contracts.session_verdict import SessionVerdict, verdict_of
+from community_os_contracts.x_text import (
+    URL_LIKE,
+    X_MAX_WEIGHT,
+    X_URL_WEIGHT,
+    x_length_problem,
+)
+from community_os_contracts.x_text import (
+    x_weighted_length as x_weighted_length,  # re-exported: the tests import it from here
+)
+
 from .writer import WriteBlocked, WriteRefused, WriteUnknown
 from .x_reader import (
     CAPABILITY_POST,
@@ -83,11 +94,12 @@ from .x_reader import (
     text_outside_posts,
 )
 
-#: X's limit, counted the way X counts it (twitter-text v3): a URL weighs `URL_WEIGHT` whatever
-#: its length, code points in `LIGHT_RANGES` weigh 1 and every other one weighs 2 (CJK, emoji).
-MAX_POST_CHARS = 280
-URL_WEIGHT = 23
-LIGHT_RANGES: tuple[tuple[int, int], ...] = ((0, 4351), (8192, 8205), (8208, 8223), (8242, 8247))
+#: X's limit, counted the way X counts it (twitter-text v3). The counter is ONE definition shared
+#: with the control plane's `draft.create` (`community_os_contracts.x_text`): until 11.10.2026 each
+#: side had its own and a bare domain weighed 23 here and 13 there, so a draft the founder approved
+#: was refused here.
+MAX_POST_CHARS = X_MAX_WEIGHT
+URL_WEIGHT = X_URL_WEIGHT
 
 HOME_URL = f"{X_ORIGIN}/home"
 
@@ -152,34 +164,27 @@ FAILED_TOAST_MARKERS: tuple[str, ...] = (
 )
 
 NOT_LOGGED_IN = "strona nie pokazuje zalogowanego konta"
+#: THE OTHER REFUSAL OF THE SAME CHECK (13.10.2026), and the difference is the point.
+#: `NOT_LOGGED_IN` is said only with proof: X sent the browser to its login screen. When the
+#: account link never appeared and there was no login screen either, nobody knows whether the
+#: session is gone or the page is slow: `community_os_contracts.session_verdict` calls that
+#: UNKNOWN, and a person must not be told to sign in again for it. The wording is therefore a
+#: statement of what happened, and says in so many words that it is not a logout. Nothing was
+#: typed in either case.
+ACCOUNT_NOT_READ = (
+    "nie odczytano konta ze strony X: nawigacja z uchwytem konta nie pojawiła się mimo drugiego "
+    "podejścia, a ekranu logowania nie było. To nie jest potwierdzone wylogowanie (strona mogła "
+    "być po prostu wolna); nic nie wysłano"
+)
 _HANDLE_RE = re.compile(rf"^{HANDLE}$")
 _POST_ID_RE = re.compile(r"^\d{1,25}$")
-#: Anything that looks like a URL or a bare domain, deliberately wider than X's own detector: a
-#: token counted as a URL when X would not count it overestimates the length (a refusal too many),
-#: while the opposite would let an over-limit text through to a composer that rejects it.
-_URL_LIKE = re.compile(
-    r"(?:https?://)?(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}"
-    r"(?::\d{1,5})?(?:/\S*)?"
-)
+#: The link detector the length counter uses, kept under its old name for the comparison below.
+_URL_LIKE = URL_LIKE
 #: X truncates the visible text of long links with it.
 _ELLIPSIS = chr(0x2026)
 
 
 # -- pure rules ------------------------------------------------------------------------------------
-
-
-def x_weighted_length(text: str) -> int:
-    """The length X's counter shows for `text`, or more, never less (see `_URL_LIKE`)."""
-    total = 0
-    position = 0
-    for match in _URL_LIKE.finditer(text):
-        total += _weight(text[position : match.start()]) + URL_WEIGHT
-        position = match.end()
-    return total + _weight(text[position:])
-
-
-def _weight(chars: str) -> int:
-    return sum(1 if any(low <= ord(c) <= high for low, high in LIGHT_RANGES) else 2 for c in chars)
 
 
 def check_text(text: str) -> None:
@@ -192,15 +197,16 @@ def check_text(text: str) -> None:
     """
     if not isinstance(text, str) or not text.strip():
         raise WriteRefused("pusta treść posta; nic nie wysłano")
-    if len(text) > MAX_POST_CHARS:
-        raise WriteRefused(
-            f"treść ma {len(text)} znaków, a limit X to {MAX_POST_CHARS}; nic nie wysłano"
-        )
-    weighted = x_weighted_length(text)
-    if weighted > MAX_POST_CHARS:
+    problem = x_length_problem(text)
+    if problem is not None:
+        kind, number = problem
+        if kind == "plain":
+            raise WriteRefused(
+                f"treść ma {number} znaków, a limit X to {MAX_POST_CHARS}; nic nie wysłano"
+            )
         raise WriteRefused(
             f"treść liczona po zasadach X (adres {URL_WEIGHT} znaki, znak spoza łaciny 2) ma "
-            f"{weighted} z {MAX_POST_CHARS}; nic nie wysłano"
+            f"{number} z {MAX_POST_CHARS}; nic nie wysłano"
         )
 
 
@@ -619,12 +625,22 @@ class XActuator:
         if is_login_wall(str(page.url)):
             raise WriteRefused(f"{NOT_LOGGED_IN} (X odesłał na ekran logowania)")
         shown = self._shown_handle(page, budget)
+        if shown is None and not _settled_elsewhere(page):
+            # ONE MORE LOOK, before anything is typed or clicked, so it costs only time. The
+            # navigation hydrates after `domcontentloaded` and the first wait (the step's budget)
+            # can end a moment before it does; a reader that waited as long would have ended in
+            # the same place, which is why both now wait the same (`x_reader.VIEWER_WAIT_MS`).
+            shown = self._shown_handle(page, budget)
         if shown is None:
             # The redirect to a login or lock screen may happen client-side, during the wait.
             if is_account_locked(str(page.url)):
                 raise WriteBlocked(_LOCKED)
-            wall = " (X odesłał na ekran logowania)" if is_login_wall(str(page.url)) else ""
-            raise WriteRefused(NOT_LOGGED_IN + wall)
+            # THE ONE RULE (`session_verdict`): the account not seen is a logout only with proof,
+            # and the proof is X's own login screen. Everything else is UNKNOWN.
+            verdict = verdict_of(account_seen=False, logged_out_proof=is_login_wall(str(page.url)))
+            if verdict is SessionVerdict.LOGGED_OUT:
+                raise WriteRefused(f"{NOT_LOGGED_IN} (X odesłał na ekran logowania)")
+            raise WriteRefused(ACCOUNT_NOT_READ)
         if shown.lower() != handle.lower():
             raise WriteBlocked(
                 f"strona pokazuje konto @{shown}, oczekiwano @{handle}: sesja w kapsule należy "
@@ -880,6 +896,13 @@ _LOCKED = (
     "X pokazuje ekran blokady konta (/account/access): konto wymaga człowieka przy ekranie, "
     "kolejka stoi"
 )
+
+
+def _settled_elsewhere(page: Any) -> bool:
+    """Did the page end up on a login or lock screen? Then another look at the navigation is
+    pointless: that screen has no account link and is the answer."""
+    url = str(page.url)
+    return is_login_wall(url) or is_account_locked(url)
 
 
 def _classified(exc: Exception, submit_started: bool) -> Exception:

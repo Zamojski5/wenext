@@ -120,3 +120,44 @@ async def note_capsule_login(
             payload={"from_state": state, "to_state": "READY"},
         )
     return AccountNoted(row["id"], str(row["external_account_id"]), True, None)
+
+
+async def writer_proof_age_s(
+    pool: Any, *, organization_id: UUID, platform: str, handle: str
+) -> float | None:
+    """Sekundy od ostatniego ZAPISU aktuatora jako to konto na tej platformie, albo `None`.
+
+    DLACZEGO TO ISTNIEJE (12 i 13.10.2026). `x.read` mówił „przeglądarka agenta nie ma sesji”,
+    a karta pokazywała „nieznana”, w tym samym czasie, w którym aktuator publikował odpowiedzi z
+    tego konta. Aktuator nie pisze bez konta na stronie, więc opublikowana odpowiedź jest
+    DEFINITYWNYM dowodem, że sesja była: starsza o minuty, ale dowodem, w odróżnieniu od odczytu,
+    który po prostu nie zdążył. Ta funkcja dostarcza ten dowód reszcie produktu (jako obserwację
+    pisarza w `session_verdict.resolve`), żeby czytelnik, który MILCZY, nie przeczył pisarzowi,
+    który MÓWI.
+
+    Źródło to `execution_evidence` (`source = 'ACTUATOR'`): jeden wiersz na skutek zapisany przez
+    kapsułę, z kontem takim, jakim nazwała je zgoda (bywa z `@`), i z `external_id` zaczynającym
+    się od `x:` dla X. Nie rzuca: brak bazy, brak tabeli albo błąd zapytania to brak dowodu, a
+    brak dowodu jest zwykłym stanem rzeczy, nie awarią, na którą ktoś ma się natknąć w karcie.
+    """
+    login = handle.strip().lstrip("@").lower()
+    if not login:
+        return None
+    try:
+        async with pool.acquire() as conn:
+            age = await conn.fetchval(
+                """
+                SELECT EXTRACT(EPOCH FROM (now() - max(observed_at)))::float8
+                  FROM execution_evidence
+                 WHERE organization_id = $1
+                   AND source = 'ACTUATOR'
+                   AND lower(ltrim(account, '@')) = $2
+                   AND (external_id LIKE 'x:%') = $3
+                """,
+                organization_id,
+                login,
+                platform == "X",
+            )
+    except Exception:
+        return None
+    return float(age) if age is not None else None

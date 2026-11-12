@@ -296,9 +296,16 @@ def build_knowledge_handlers(
     """
     from control_plane.knowledge.handlers import KnowledgeHandlers
     from control_plane.knowledge.ingest import Ingestor, artifact_volume
+    from control_plane.learning.sources import LearningSources
+    from control_plane.observe.capsule_session import x_probe_from_env
 
     env = os.environ if env is None else env
     queue = PostgresJobTransport(JobStore(pool), organization_id=organization_id)
+    # The learning loop rides the hourly experience sweep (`learning/service.py`). It reads X
+    # through the same capsule the `x.*` tools use (built per sweep and closed at its end) and
+    # through the public mirror, and Reddit through the reader the publisher already has.
+    reddit = build_sources(env).get(ObservationPlatform.REDDIT)
+    reddit_reader = reddit if hasattr(reddit, "read_thread_payload") else None
     return KnowledgeHandlers(
         pool=pool,
         # The volume is built at the first write, not here. `build_handlers` runs at process
@@ -307,6 +314,9 @@ def build_knowledge_handlers(
         ingestor=Ingestor(pool=pool, volume_factory=lambda: artifact_volume(env)),
         organization_id=organization_id,
         queue=queue,
+        learning_sources=lambda: LearningSources(
+            x_source_factory=lambda: x_probe_from_env(env), reddit_source=reddit_reader
+        ),
     )
 
 
@@ -547,6 +557,7 @@ def build_publish_handlers(
             port_factory = make_port
             own_post_port_factory = make_own_post_port
 
+    from control_plane.opportunities.freshness import DraftFreshness
     from control_plane.pilot.policy import PolicyAutoApprover, PolicyStore
 
     autoapprover = PolicyAutoApprover(
@@ -581,4 +592,6 @@ def build_publish_handlers(
         x_port_factory=x_port_factory,
         x_own_post_port_factory=x_own_post_port_factory,
         x_capsule_state=x_capsule_state,
+        # v11: a waiting reply whose post went cold is expired by this tick, not only hidden.
+        freshness=DraftFreshness(pool, organization_id),
     )

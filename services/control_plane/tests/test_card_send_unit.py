@@ -71,6 +71,7 @@ from control_plane.tools.card_send import (
 from control_plane.tools.catalog import (
     APP_ONLY_BY_NAME,
     APP_ONLY_HOSTS,
+    CATALOG,
     allowed_for_host,
     app_manifest,
 )
@@ -108,7 +109,27 @@ def _capability(**changes):
 
 
 def test_the_card_tools_are_not_in_the_catalog_the_model_reads() -> None:
-    assert {"room.send_token", "room.send_draft", "room.send_status"} == APP_ONLY_TOOLS
+    assert {
+        # the send (card_send) and, since v9, the rest of what a person does in the card (card_actions)
+        "room.send_token",
+        "room.send_draft",
+        "room.send_status",
+        "room.revise_draft",
+        "room.scope_token",
+        "room.pause",
+        "room.resume",
+        "room.sign_scope",
+        # and, since v10, connecting an account from the card (card_connect)
+        "room.connect_token",
+        "room.connect_account",
+        "room.connect_done",
+        "room.account_status",
+        # and, since v11, sending a whole reviewed batch with one click (card_batch)
+        "room.batch_token",
+        "room.send_batch",
+        # and, since v11 (round 3), the small inline pictures of the posts the card draws (card_pictures)
+        "room.pictures",
+    } == APP_ONLY_TOOLS
     assert not APP_ONLY_TOOLS & set(BY_NAME), "narzędzie karty stoi w katalogu modelu"
     assert not APP_ONLY_TOOLS & PLUGIN_TOOLS
     assert not APP_ONLY_TOOLS & set(PLUGIN_EXCLUDED)
@@ -116,7 +137,7 @@ def test_the_card_tools_are_not_in_the_catalog_the_model_reads() -> None:
         assert not {e["name"] for e in manifest(host=host)} & APP_ONLY_TOOLS, host
         assert not {e["name"] for e in listing(host=host)} & APP_ONLY_TOOLS, host
     # `catalog.list` counts the catalog: it did not grow.
-    assert len(manifest()) == 54
+    assert len(manifest()) == len(CATALOG)
 
 
 def test_only_a_codex_host_is_given_the_card_tools_and_they_say_app_only() -> None:
@@ -680,7 +701,7 @@ def test_the_card_says_what_one_click_does_in_the_words_the_founder_chose() -> N
         "Opublikowano.",
         "Zobacz odpowiedź",
         "Otwórz Obecność",
-        "Zatwierdź w Pokoju",
+        "Pełny widok",
     ):
         assert words in html, words
     # The same sentences in English, for the public launch (v5): the dictionary is in the card.
@@ -695,10 +716,19 @@ def test_the_card_says_what_one_click_does_in_the_words_the_founder_chose() -> N
         "Queued.",
         "Posted.",
         "Open Presence",
-        "Approve in Room",
+        "Open full view",
     ):
         assert words in html, words
-    assert apps_ui.OPPORTUNITIES_URI == "ui://wenext/okazje-v8.html"
+    # v9: the dashboard is not a button of the flow any more.
+    for gone in (
+        "Approve in Room",
+        "Zatwierdź w Pokoju",
+        "Open Room",
+        "Otwórz Pokój",
+        "data-approve",
+    ):
+        assert gone not in html, gone
+    assert apps_ui.OPPORTUNITIES_URI == "ui://wenext/okazje-v11.html"
     assert '"wenext/potwierdzenie"' in html, "karta czyta potwierdzenie z `_meta`, nie z tekstu"
     # "Opublikowano" is said only on the word of the publisher; a queued request is not a post.
     assert 'w.status === "PUBLISHED"' in html
@@ -717,6 +747,15 @@ def test_the_card_says_what_one_click_does_in_the_words_the_founder_chose() -> N
         "control_plane/tools/apps_ui.py",
         "tests/test_card_send_unit.py",
         "tests/test_card_send_db.py",
+        # v9: the rest of what a person does from the card (revise, pause, resume, limits).
+        "control_plane/tools/card_actions.py",
+        "control_plane/presence/human_revision.py",
+        "control_plane/tools/opportunity_tools.py",
+        "control_plane/opportunities/room.py",
+        "control_plane/opportunities/store.py",
+        "tests/test_card_actions_unit.py",
+        "tests/test_card_actions_db.py",
+        "tests/test_card_v9_unit.py",
     ],
 )
 def test_the_files_of_this_feature_have_no_long_dash(name: str) -> None:

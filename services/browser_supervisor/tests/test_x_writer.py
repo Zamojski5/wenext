@@ -17,8 +17,10 @@ import pytest
 from browser_supervisor.writer import WriteBlocked, WriteRefused, WriteUnknown
 from browser_supervisor.x_reader import SEL_ACCOUNT_SWITCHER, SEL_NAV_PROFILE_LINK
 from browser_supervisor.x_writer import (
+    ACCOUNT_NOT_READ,
     HOME_URL,
     MAX_POST_CHARS,
+    NOT_LOGGED_IN,
     URL_WEIGHT,
     XActuator,
     authorize_reply_target,
@@ -97,13 +99,57 @@ def test_another_account_in_the_session_blocks_before_anything_is_typed() -> Non
     assert _typed_or_clicked(page) == []
 
 
-def test_no_account_on_the_page_is_a_refusal() -> None:
+def test_no_account_on_the_page_is_a_refusal_that_does_not_claim_a_logout() -> None:
+    """The account link never appeared and there was no login screen either. Nothing is typed, and
+    the refusal says what happened: it must NOT say the account is not logged in, because nobody
+    saw that (13.10.2026: the reader and the card said the session was there)."""
     page = _reply_page(viewer=None)
     Composer(page)
-    with pytest.raises(WriteRefused, match="strona nie pokazuje zalogowanego konta") as refused:
+    with pytest.raises(WriteRefused) as refused:
         _reply(page)
     assert refused.value.submit_started is False
+    assert str(refused.value) == ACCOUNT_NOT_READ
+    assert "nie jest potwierdzone wylogowanie" in str(refused.value)
+    assert NOT_LOGGED_IN not in str(refused.value)
     assert _typed_or_clicked(page) == []
+
+
+def test_a_slow_navigation_gets_a_second_look_before_anyone_calls_it_unread() -> None:
+    """The link of the logged-in navigation appears on the second look (X hydrates after
+    `domcontentloaded`): the reply goes out. The first look alone would have refused it."""
+    page = _reply_page(viewer=None)
+    looks = {"n": 0}
+
+    def link() -> list[Element]:
+        looks["n"] += 1
+        return [] if looks["n"] <= 1 else [Element(attrs={"href": f"/{ACCOUNT}"})]
+
+    page.elements[SEL_NAV_PROFILE_LINK] = link
+    Composer(page, on_submit=_our_reply_appears(page))
+
+    outcome, *_ = _reply(page)
+
+    assert outcome.post_id == FRESH_ID and looks["n"] >= 2
+
+
+def test_a_login_wall_is_not_looked_at_twice_and_still_says_not_logged_in() -> None:
+    """A wall is an ANSWER: the login screen has no account link, so waiting for one again would
+    only spend the budget. This is the one case that keeps the old sentence."""
+    page = _reply_page(
+        viewer=None,
+        redirect_to="https://x.com/i/flow/login?redirect_after_login=%2Fjack%2Fstatus%2F1",
+    )
+    looks = {"n": 0}
+
+    def link() -> list[Element]:
+        looks["n"] += 1
+        return []
+
+    page.elements[SEL_NAV_PROFILE_LINK] = link
+    with pytest.raises(WriteRefused) as refused:
+        _reply(page)
+    assert NOT_LOGGED_IN in str(refused.value) and "ekran logowania" in str(refused.value)
+    assert looks["n"] <= 2, "one wait for the account link, not two"
 
 
 def test_the_account_switcher_is_the_fallback_for_the_identity() -> None:
@@ -184,6 +230,41 @@ def test_a_short_link_counts_as_23_and_can_push_a_text_over_the_limit() -> None:
 )
 def test_the_weighted_length_follows_x(text: str, weighted: int) -> None:
     assert x_weighted_length(text) == weighted
+
+
+#: The founder's post of 11.10.2026, character for character: 275 by `len`, and the control plane's
+#: `draft.create` counted it as 275 too because it did not see `getwenext.com` as a link. The
+#: actuator counts the bare domain as 23, so the post is 285 of 280. The draft and the actuator
+#: now use ONE function (`community_os_contracts.x_text`); the control plane's tests repeat this
+#: vector.
+FOUNDER_POST = (
+    "I'm good at building things. Getting people to use them, not so much.\n\n"
+    'So I\'m building Wenext: type "find my first users" in the Codex chat where you built your '
+    "app. It finds people on Reddit who need it and drafts your reply.\n\n"
+    "Nothing posts without your click. getwenext.com"
+)
+
+
+def test_the_founders_post_is_refused_as_285_of_280_and_the_count_is_the_shared_one() -> None:
+    from community_os_contracts import x_text
+
+    assert x_weighted_length is x_text.x_weighted_length, "one definition, not a copy"
+    assert len(FOUNDER_POST) == 275
+    assert x_weighted_length(FOUNDER_POST) == 285
+    with pytest.raises(WriteRefused, match=r"ma 285 z 280") as refused:
+        check_text(FOUNDER_POST)
+    assert refused.value.submit_started is False
+    # Without the domain it fits, which is what "a shorter one worked" was.
+    check_text(FOUNDER_POST.removesuffix(" getwenext.com"))
+
+
+def test_the_punctuation_after_a_link_is_not_part_of_the_link() -> None:
+    """A sentence that ends with a link path and a full stop weighs the stop as text, so the
+    count is not one short of X's (an undercount would pass here and fail in the composer)."""
+    assert x_weighted_length("https://getwenext.com/page.") == URL_WEIGHT + 1
+    assert x_weighted_length("a" * 256 + " getwenext.com/x).") == 256 + 1 + URL_WEIGHT + 2
+    with pytest.raises(WriteRefused, match="zasadach X"):
+        check_text("a" * 256 + " getwenext.com/x).")
 
 
 def test_an_empty_text_is_refused() -> None:

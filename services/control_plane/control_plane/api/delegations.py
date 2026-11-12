@@ -221,6 +221,24 @@ async def sign_delegation(
     except ScopeError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    # A scope that permits nothing is a signature that LOOKS like a permission (11.10: the first
+    # attempt of the founder's day saved one with no accounts and no actions, without a word).
+    # Refused here, at the form's route, and not in `PresenceStore.sign`: a RESEARCH-only scope
+    # names no account on purpose, and the store has other callers that sign such scopes.
+    if not scope.actions:
+        raise HTTPException(
+            status_code=422,
+            detail="zakres bez działań nic nie pozwala robić: zaznacz co najmniej jedno działanie",
+        )
+    if not scope.accounts and any(one in ("REPLY", "OWN_POST") for one in scope.actions):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "zakres bez kont nie pozwala niczego opublikować: zaznacz co najmniej jedno konto "
+                "(zakres samego RESEARCH może ich nie mieć)"
+            ),
+        )
+
     expires_at = signed_deadline(body.expires_at, now=datetime.now(UTC))
     store = await _presence(request)
     try:

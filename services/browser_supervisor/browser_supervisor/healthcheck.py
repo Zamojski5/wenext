@@ -27,8 +27,20 @@ from .devtools_port import MissingDevToolsPort, StaleDevToolsPort, verify
 #: which runs every few seconds, does not import the whole reader; a test keeps the two equal.
 READER_TOKEN_HEADER = "X-Wenext-Reader-Token"
 
+#: THE BUDGET OF ONE CHECK, in seconds, and why it is spelled out. Until 13.10.2026 the two waits
+#: below were 3 s each, and a hung browser makes BOTH of them run to the end (the DevTools port does
+#: not answer, and then the reader, whose single thread is stuck behind the same browser, does not
+#: accept the question about the human screen either): 6 s of a check that Docker kills at 5 s, so
+#: for hours the status read "Health check exceeded timeout (5s)" and the log never said WHY. The
+#: two budgets now add up to less than half of the compose timeout, and a failed check ends with a
+#: sentence.
+CDP_TIMEOUT_S = 2.0
+STATE_TIMEOUT_S = 1.5
 
-def person_at_the_screen(env: dict[str, str] | None = None) -> bool:
+
+def person_at_the_screen(
+    env: dict[str, str] | None = None, *, timeout: float = STATE_TIMEOUT_S
+) -> bool:
     """Whether the launch running now is a person's sign-in, which has no DevTools endpoint on
     purpose (`args.HUMAN_ARGS`). The reader's `/state` says so; without a reader, nobody can tell,
     and the answer is no."""
@@ -41,7 +53,7 @@ def person_at_the_screen(env: dict[str, str] | None = None) -> bool:
         f"http://127.0.0.1:{port}/state", headers={READER_TOKEN_HEADER: token}
     )
     try:
-        with urllib.request.urlopen(request, timeout=3) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             state = json.load(response)
     except Exception:
         return False
@@ -70,7 +82,7 @@ def main() -> int:
             profil,
             expected_browser=expected,
             host=os.environ.get("WENEXT_CDP_HOST", "127.0.0.1"),
-            timeout=3.0,
+            timeout=CDP_TIMEOUT_S,
         )
     except (MissingDevToolsPort, StaleDevToolsPort) as exc:
         if person_at_the_screen():

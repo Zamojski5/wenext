@@ -22,6 +22,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from control_plane.opportunities.avatars import PICTURE_HOSTS
 from control_plane.sessions.trace_payloads import (
     args_digest,
     tool_call_payload,
@@ -165,10 +166,10 @@ EXCLUDED = (
 
 def test_every_catalog_tool_is_on_exactly_one_of_the_two_lists() -> None:
     names = {spec.name for spec in CATALOG}
-    assert len(CATALOG) == 54, "katalog Wenext-run zmienił rozmiar; profil wtyczki wymaga decyzji"
+    assert len(CATALOG) == 55, "katalog Wenext-run zmienił rozmiar; profil wtyczki wymaga decyzji"
     assert PLUGIN_TOOLS & set(PLUGIN_EXCLUDED) == set(), "narzędzie na obu listach"
     assert PLUGIN_TOOLS | set(PLUGIN_EXCLUDED) == names, "narzędzie na żadnej liście"
-    assert len(PLUGIN_TOOLS) == 47 and len(PLUGIN_EXCLUDED) == 7
+    assert len(PLUGIN_TOOLS) == 48 and len(PLUGIN_EXCLUDED) == 7
     assert set(PLUGIN_EXCLUDED) == set(EXCLUDED)
 
 
@@ -183,10 +184,11 @@ def test_the_plugin_manifest_is_the_allowlist_and_the_default_stays_the_whole_ca
     assert {entry["name"] for entry in narrowed} == PLUGIN_TOOLS
     assert not {entry["name"] for entry in narrowed} & set(EXCLUDED)
 
-    # The Wenext-run path is untouched: 53 entries, with or without the platform narrowing.
-    assert len(manifest()) == 54
-    assert len(manifest(frozenset({"comment"}))) == 54
-    assert len(listing()) == 54
+    # The Wenext-run path is untouched: 55 entries (`playbook.read`, 13.10, is the newest), with or
+    # without the platform narrowing.
+    assert len(manifest()) == 55
+    assert len(manifest(frozenset({"comment"}))) == 55
+    assert len(listing()) == 55
     assert {entry["name"] for entry in listing(host="claude-code")} == PLUGIN_TOOLS
 
 
@@ -265,6 +267,15 @@ def test_the_result_payload_reads_cards_and_outcome_from_the_mcp_envelope() -> N
     assert result["outcome"] == "OCZEKUJE"
     assert result["status"] == "completed"
     assert result["result"]["content"][0]["type"] == "text"
+
+
+def test_both_rows_of_a_call_carry_the_same_call_id_and_none_without_an_id() -> None:
+    """`_already_done` pairs a call with ITS OWN result by this id (12.10)."""
+    item = {"id": "abc123", "tool": "draft.create", "arguments": {}, "status": "completed"}
+    call, result = tool_call_payloads(item)
+    assert call["call_id"] == result["call_id"] == "abc123"
+    bare, bare_result = tool_call_payloads({"tool": "draft.create", "arguments": {}})
+    assert "call_id" not in bare and "call_id" not in bare_result
 
 
 def test_the_digest_the_registry_reads_is_the_one_the_trace_writes() -> None:
@@ -466,7 +477,7 @@ def test_tools_list_is_the_narrow_one_for_a_host_and_the_whole_one_otherwise() -
     host_names = {tool["name"] for tool in host_answer["result"]["tools"]}
     assert host_names - APP_ONLY_TOOLS == PLUGIN_TOOLS
     assert host_names & APP_ONLY_TOOLS == APP_ONLY_TOOLS
-    assert len(wenext_run_answer["result"]["tools"]) == 54
+    assert len(wenext_run_answer["result"]["tools"]) == 55
     assert not {t["name"] for t in wenext_run_answer["result"]["tools"]} & APP_ONLY_TOOLS
 
 
@@ -573,10 +584,14 @@ def test_a_host_gets_the_room_card_and_a_wenext_run_session_does_not() -> None:
     ] == ["room.show"]
     assert {name for name, t in tools.items() if "_meta" in t} == {"room.show", *APP_ONLY_TOOLS}
     assert [r["uri"] for r in host[2]["result"]["resources"]] == [apps_ui.OPPORTUNITIES_URI]
-    assert apps_ui.OPPORTUNITIES_URI.endswith("-v8.html")
+    assert apps_ui.OPPORTUNITIES_URI.endswith("-v11.html")
     content = host[3]["result"]["contents"][0]
     assert content["mimeType"] == "text/html;profile=mcp-app"
-    assert content["_meta"]["ui"]["csp"] == {"connectDomains": [], "resourceDomains": []}
+    # EMPTY, but for the author's avatar (v11, the founder 13.10): only the platforms' own image hosts.
+    assert content["_meta"]["ui"]["csp"] == {
+        "connectDomains": [],
+        "resourceDomains": [f"https://{host}" for host in PICTURE_HOSTS],
+    }
     # The host gets the result as an object next to the text block; the card is drawn from it.
     assert host[4]["result"]["structuredContent"] == {"stan": "WYKONANE"}
     assert host[5]["error"]["code"] == -32602, "v2 jest nieaktualna i nie jest już serwowana"
@@ -691,19 +706,18 @@ def test_the_card_html_is_self_contained_dash_free_and_cannot_act_but_through_th
     }
     assert 'rpc("tools/call"' in html
     # (v6: the send machine reaches the host through `env.call`, which is the card's `callTool`.)
-    called = set(re.findall(r"""(?:callTool|env\.call)\("([a-z.]+_[a-z]+)\"""", html))
+    # v9: every tool name the card writes as a string. The three tools that change the scope are named in
+    # one ternary (`room.pause`, `room.resume`, `room.sign_scope`), so the names are read as literals.
+    called = set(re.findall(r"""["']((?:room|draft)\.[a-z_]+)["']""", html))
     # v8 (hosted): the manual flow's "Done" calls `draft.mark_posted`, the one catalog tool the card
     # names. It records the person's own statement that they posted by hand and publishes nothing.
-    assert called == {
-        "room.send_token",
-        "room.send_draft",
-        "room.send_status",
-        "draft.mark_posted",
-    }
-    assert called - {"draft.mark_posted"} == set(APP_ONLY_TOOLS)
+    # `room.show` is the one read the card makes itself: after a repeated save the server says "already
+    # done" without the draft, and the card reads the Pokój again.
+    assert called == {*APP_ONLY_TOOLS, "draft.mark_posted", "room.show"}
     assert not re.search(r"drafts?\.(publish|create)|delegation\.", html)
     assert "/approvals" not in html and "/approve" not in html
-    assert "#szkic-" in html and "Zatwierdź w Pokoju" in html
+    # v9: the full-view link still lands on the draft, but it is one small footer link, not "Approve".
+    assert "#szkic-" in html and "Zatwierdź w Pokoju" not in html
 
 
 def test_the_card_has_the_words_of_the_pokoj_and_never_a_zero_for_a_gap() -> None:

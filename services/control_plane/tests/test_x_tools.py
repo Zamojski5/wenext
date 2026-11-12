@@ -33,6 +33,60 @@ def test_x_counts_a_url_as_23_and_wide_characters_as_two() -> None:
     assert x_text_weight("日本") == 4
 
 
+#: The text of the founder's post that `draft.create` accepted as 275 and the actuator refused as
+#: 285 of 280 (11.10.2026), character for character.
+FOUNDER_POST = (
+    "I'm good at building things. Getting people to use them, not so much.\n\n"
+    'So I\'m building Wenext: type "find my first users" in the Codex chat where you built your '
+    "app. It finds people on Reddit who need it and drafts your reply.\n\n"
+    "Nothing posts without your click. getwenext.com"
+)
+
+
+def test_the_draft_and_the_actuator_count_with_one_function() -> None:
+    """The cause of 11.10.2026 was two counters. `x_text_weight` is the shared one, by identity,
+    so no edit to one side can leave the other behind; the vectors repeat the founder's post."""
+    from community_os_contracts import x_text
+
+    assert x_text_weight is x_text.x_weighted_length
+    assert len(FOUNDER_POST) == 275
+    assert x_text_weight(FOUNDER_POST) == 285
+    assert x_text_weight("getwenext.com") == 23
+    assert x_text_weight("see x.co/a, then getwenext.com.") == 4 + 23 + 7 + 23 + 1
+
+
+def _bare_registry() -> ToolRegistry:
+    return ToolRegistry(
+        pool=None,  # type: ignore[arg-type]  # the target and the length need no database
+        capability=issue(
+            session_id=uuid4(),
+            organization_id=uuid4(),
+            workspace_id=uuid4(),
+            project_id=uuid4(),
+            dsn="postgresql://atrapa/nieuzywane",
+        ),
+    )
+
+
+@pytest.mark.parametrize("kind", ["OWN_POST", "REPLY"])
+def test_an_x_draft_over_the_actuators_count_is_refused_with_the_actuators_number(
+    kind: str,
+) -> None:
+    """The founder's post, which the old draft counter let through, is refused HERE with 285."""
+    refused = _bare_registry()._x_draft_target(
+        kind=kind, text=FOUNDER_POST, title="", account=HANDLE, target_url=POST_URL
+    )
+    assert refused["stan"] == "NIEDOSTEPNE", refused
+    assert "285" in refused["powod"] and "280" in refused["powod"]
+    assert "getwenext.com" in refused["wskazowka"], "the hint names the rule that bit"
+
+    shorter = FOUNDER_POST.removesuffix(" getwenext.com")
+    fits = _bare_registry()._x_draft_target(
+        kind=kind, text=shorter, title="", account=HANDLE, target_url=POST_URL
+    )
+    assert "stan" not in fits and fits["target_external_id"], fits
+
+
 @dataclass
 class DumbSource:
     identity: XSessionState
@@ -182,6 +236,87 @@ async def test_a_post_page_comes_back_with_relations_and_read_counters(
     assert source.identity_reads == 1, "tożsamość raz na turę, nie przy każdym odczycie"
 
 
+async def _seed_actuator_evidence(
+    pool, tenant, *, account: str, external_id: str, seconds_ago: float
+) -> None:
+    """One row of what the actuator wrote, `seconds_ago` ago. The foreign keys to the attempt are
+    not the subject here (the query reads the evidence alone), so they are switched off for this
+    one transaction instead of rebuilding a whole approval chain around a row."""
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute("SET LOCAL session_replication_role = replica")
+        await conn.execute(
+            "INSERT INTO execution_evidence (organization_id, workspace_id, attempt_id, "
+            "external_id, permalink, account, observed_at, source) "
+            "VALUES ($1, $2, $3, $4, 'https://x.com/a/status/1', $5, "
+            "now() - make_interval(secs => $6), 'ACTUATOR')",
+            tenant["organization"],
+            tenant["workspace"],
+            uuid4(),
+            external_id,
+            account,
+            seconds_ago,
+        )
+
+
+@pytest.mark.db
+async def test_the_writers_proof_is_the_age_of_its_last_write_as_that_account(pool, tenant) -> None:
+    from control_plane.workspace.account_state import writer_proof_age_s
+
+    org = tenant["organization"]
+    assert await writer_proof_age_s(pool, organization_id=org, platform="X", handle=HANDLE) is None
+    await _seed_actuator_evidence(
+        pool, tenant, account="@Demo_Agent", external_id="x:2109722413122371639", seconds_ago=300
+    )
+    await _seed_actuator_evidence(
+        pool, tenant, account=HANDLE, external_id="x:2109722713741029594", seconds_ago=120
+    )
+    await _seed_actuator_evidence(
+        pool, tenant, account=HANDLE, external_id="t1_reddit01", seconds_ago=10
+    )
+    x = await writer_proof_age_s(pool, organization_id=org, platform="X", handle="@DEMO_agent")
+    assert x is not None and 115 <= x <= 135, "the newest X write, the handle in any case"
+    reddit = await writer_proof_age_s(pool, organization_id=org, platform="REDDIT", handle=HANDLE)
+    assert reddit is not None and 5 <= reddit <= 25, "a Reddit write is not an X proof, nor back"
+    assert await writer_proof_age_s(pool, organization_id=org, platform="X", handle="other") is None
+    assert (
+        await writer_proof_age_s(pool, organization_id=uuid4(), platform="X", handle=HANDLE) is None
+    ), "another organization's writes prove nothing here"
+    assert await writer_proof_age_s(pool, organization_id=org, platform="X", handle=" ") is None
+
+
+@pytest.mark.db
+async def test_a_look_that_could_not_tell_is_not_a_lost_session_and_the_writer_can_vouch(
+    pool, tenant, monkeypatch
+) -> None:
+    """13.10.2026 through the tool the model calls, against the real evidence table: the browser
+    did not answer, so there is no verdict; with no write behind the account the agent is told to
+    retry (not to log in), and once the actuator has published as the account the same call reads."""
+    registry, _ = await _registry(pool, tenant)
+    source = DumbSource(
+        XSessionState(
+            False,
+            None,
+            datetime.now(UTC),
+            error="czytnik kapsuły nie odpowiedział w czasie",
+            failure="TIMEOUT",
+        ),
+        page=_page(),
+    )
+    _use(monkeypatch, source)
+
+    refused = await registry.call("x.read", {"url": POST_URL})
+    assert refused["stan"] == "NIEDOSTEPNE" and refused["kod"] == "SESJA_NIEPEWNA", refused
+    assert "karty" not in refused and source.reads == []
+
+    await _seed_actuator_evidence(
+        pool, tenant, account=HANDLE, external_id="x:2109722413122371639", seconds_ago=90
+    )
+    read = await registry.call("x.read", {"url": POST_URL})
+    assert read["stan"] == "WYKONANE", read
+    assert source.reads == [(POST_URL, False)]
+    assert any("publikowało" in line for line in read["ograniczenia"]), read["ograniczenia"]
+
+
 @pytest.mark.db
 async def test_an_x_refusal_keeps_its_code_and_says_not_to_retry(pool, tenant, monkeypatch) -> None:
     registry, _ = await _registry(pool, tenant)
@@ -247,6 +382,35 @@ async def test_an_own_x_post_has_no_title_and_respects_the_weighted_limit(pool, 
     )
     assert fine["stan"] == "OCZEKUJE", fine
     assert fine["propozycja"]["cel"] == f"x:@{HANDLE}"
+
+
+@pytest.mark.db
+async def test_the_founders_x_post_is_refused_at_the_draft_and_the_shorter_one_is_not(
+    pool, tenant
+) -> None:
+    """The regression of 11.10.2026 through the tool the model calls: 275 characters with a bare
+    domain is 285 as X counts it, so no consent is ever spent on it."""
+    registry, _ = await _registry(pool, tenant)
+    refused = await registry.call(
+        "draft.create", {"kind": "OWN_POST", "text": FOUNDER_POST, "account": HANDLE}
+    )
+    assert refused["stan"] == "NIEDOSTEPNE", refused
+    assert "285" in refused["powod"]
+
+    reply = await registry.call(
+        "draft.create", {"text": FOUNDER_POST, "account": HANDLE, "target_url": POST_URL}
+    )
+    assert reply["stan"] == "NIEDOSTEPNE" and "285" in reply["powod"], reply
+
+    fine = await registry.call(
+        "draft.create",
+        {
+            "kind": "OWN_POST",
+            "text": FOUNDER_POST.removesuffix(" getwenext.com"),
+            "account": HANDLE,
+        },
+    )
+    assert fine["stan"] == "OCZEKUJE", fine
 
 
 @pytest.mark.db
@@ -386,6 +550,93 @@ async def test_a_refused_call_is_not_already_done_and_a_written_one_is(pool, ten
     )
     repeated = await registry._already_done("drafts.publish", args)
     assert repeated is not None and repeated["poprzedni_wynik"] == {"stan": "OCZEKUJE"}
+
+
+@pytest.mark.db
+@pytest.mark.parametrize("with_call_id", [True, False], ids=["call_id", "legacy_rows"])
+async def test_a_call_whose_own_result_failed_is_not_done_by_another_calls_success(
+    pool, tenant, with_call_id: bool
+) -> None:
+    """12.10: six `draft.create` calls failed on a missing migration and were repeated after it.
+    The first repeat succeeded; every later one came back as "already done" with THAT result,
+    because the pairing took any later successful result of the same tool, and no draft was
+    written for them. The sequence is the one of the day: A and B fail, A succeeds, B is asked
+    again and must be neither done nor silently dropped."""
+    import json as json_
+    from uuid import UUID
+
+    from control_plane.sessions.trace_payloads import tool_call_payload, tool_result_payload
+    from control_plane.tools.registry import render_content
+
+    registry, _ = await _registry(pool, tenant)
+    a = {"text": "Pierwszy.", "account": HANDLE, "target_url": POST_URL}
+    b = {
+        "text": "Drugi.",
+        "account": HANDLE,
+        "target_url": "https://x.com/martinleblanc/status/2103587050346250342",
+    }
+
+    async def trace(kind: str, payload: dict) -> None:
+        if not with_call_id:
+            payload = {k: v for k, v in payload.items() if k != "call_id"}
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO session_events (organization_id, workspace_id, session_id, seq, "
+                "kind, payload) VALUES ($1, $2, $3, "
+                "(SELECT coalesce(max(seq), 0) + 1 FROM session_events WHERE session_id = $3), "
+                "$4, $5::jsonb)",
+                tenant["organization"],
+                tenant["workspace"],
+                registry.capability.session_id,
+                kind,
+                json_.dumps(payload),
+            )
+
+    async def failing_call(args: dict) -> None:
+        item = {"id": uuid4().hex, "tool": "draft.create", "server": "wenext", "arguments": args}
+        await trace("TOOL_CALL", tool_call_payload(item))
+        item.update(status="failed", error="UndefinedColumnError: missing migration", result=None)
+        await trace("TOOL_RESULT", tool_result_payload(item))
+
+    async def real_call(args: dict) -> dict:
+        """What the plugin server does around `registry.call`: call row, the call, result row."""
+        item = {"id": uuid4().hex, "tool": "draft.create", "server": "wenext", "arguments": args}
+        await trace("TOOL_CALL", tool_call_payload(item))
+        result = await registry.call("draft.create", args)
+        item.update(
+            status="completed",
+            result={"content": render_content(result), "isError": False},
+        )
+        await trace("TOOL_RESULT", tool_result_payload(item))
+        return result
+
+    await failing_call(a)
+    await failing_call(b)
+    assert await registry._already_done("draft.create", a) is None
+    assert await registry._already_done("draft.create", b) is None
+
+    first = await real_call(a)
+    assert first["stan"] == "OCZEKUJE", first
+    # A is done now, with its OWN result ...
+    done_a = await registry._already_done("draft.create", a)
+    assert done_a is not None and done_a["stan"] == "WYKONANE"
+    # ... and B, whose own result failed, is not, though a successful draft.create is later.
+    assert await registry._already_done("draft.create", b) is None
+
+    second = await real_call(b)
+    assert second["stan"] == "OCZEKUJE" and "powtorzone" not in second, second
+    assert second["propozycja"]["revision_id"] != first["propozycja"]["revision_id"]
+    assert second["propozycja"]["cel"] == "x:2103587050346250342"
+    async with pool.acquire() as conn:
+        drafts = await conn.fetchval(
+            "SELECT count(*) FROM action_proposal_revisions WHERE id = ANY($1::uuid[])",
+            [UUID(first["propozycja"]["revision_id"]), UUID(second["propozycja"]["revision_id"])],
+        )
+    assert drafts == 2, "każdy z dwóch różnych celów ma własny szkic"
+    # And a genuine repeat of B is now recognised, with B's result and not A's.
+    repeated = await registry._already_done("draft.create", b)
+    assert repeated is not None
+    assert "x:2103587050346250342" in json_.dumps(repeated["poprzedni_wynik"])
 
 
 @pytest.mark.db

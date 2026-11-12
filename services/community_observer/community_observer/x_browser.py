@@ -27,6 +27,7 @@ and an own post belong to the actuator and go through the action adapter and the
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import re
 from dataclasses import dataclass, field
@@ -35,6 +36,12 @@ from typing import Any
 from urllib.parse import quote, urlencode, urlsplit
 
 import httpx
+from community_os_contracts.session_verdict import (
+    ReadFailure,
+    SessionVerdict,
+    is_retryable,
+    verdict_of,
+)
 
 from .reddit_browser import READER_TOKEN_HEADER, HttpBrowserReader
 from .source import CredentialsMissing, SourceUnavailable
@@ -49,6 +56,14 @@ X_READ_PATH = "/x/read"
 HANDLE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
 #: `https://x.com/<handle>/status/<id>`, the only shape of a post address this product accepts.
 STATUS_URL = re.compile(r"^https://x\.com/([A-Za-z0-9_]{1,15})/status/(\d{1,25})/?$")
+
+#: How many more looks at the session an UNKNOWN one gets (a timeout, a capsule that did not answer,
+#: an account link that did not show up in time) before it is reported. One: a second look is cheap
+#: and settles most of them, and a hung capsule is not worth more of the caller's time.
+SESSION_RETRIES = 1
+#: A breath between the two. The capsule paces X page loads itself (8 s), so this is only so that
+#: the retry is not made in the same millisecond as the failure it follows.
+SESSION_RETRY_PAUSE_S = 1.0
 
 
 class XPlatformRefused(SourceUnavailable):
@@ -67,6 +82,20 @@ class XPlatformRefused(SourceUnavailable):
             429: "X ogranicza tempo (429). Trzeba zwolnić i wrócić później.",
         }.get(status, f"X odpowiedział {status}.")
         super().__init__(f"{readable} ({url})" + (f" {detail}" if detail else ""))
+
+
+class XReadTransient(SourceUnavailable):
+    """The read did not complete, and nothing says the session is gone.
+
+    The capsule did not answer in time, did not accept the connection, or failed without a word
+    from the platform. A subclass of `SourceUnavailable`, so every caller that handled "the read
+    failed" still does; the `kind` is what `session_state` uses to decide that the look is UNKNOWN
+    (never "no session") and worth one more try (`session_verdict.is_retryable`).
+    """
+
+    def __init__(self, message: str, kind: ReadFailure) -> None:
+        super().__init__(message)
+        self.kind = kind
 
 
 def canonical_handle(value: str) -> str:
@@ -107,6 +136,27 @@ class XSessionState:
     #: True only when X itself showed the login screen: the one case where "sign in again" is the
     #: right sentence. A failed read or an unread handle is not the person's job to fix.
     login_wall: bool = False
+    #: Why the look established nothing (`ReadFailure` value), when it did not. `None` on a clean
+    #: look and on a login wall (that one IS an answer).
+    failure: str | None = None
+
+    @property
+    def verdict(self) -> SessionVerdict:
+        """The ONE reading of this state: logged in, logged out (a wall, nothing less), or unknown.
+
+        The same rule as `card_connect.reading_of_x`, the publisher's gate and the X actuator
+        (`community_os_contracts.session_verdict`). `logged_in=False` alone says nothing: it is
+        also what a timeout and a page whose account link did not show up in time come back as.
+        """
+        return state_verdict(self)
+
+    @property
+    def unknown(self) -> bool:
+        return self.verdict is SessionVerdict.UNKNOWN
+
+    @property
+    def session_lost(self) -> bool:
+        return self.verdict is SessionVerdict.LOGGED_OUT
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -115,7 +165,22 @@ class XSessionState:
             "checked_at": self.checked_at.isoformat(),
             "error": self.error,
             "login_wall": self.login_wall,
+            "verdict": self.verdict.value,
+            "failure": self.failure,
         }
+
+
+def state_verdict(state: Any) -> SessionVerdict:
+    """The verdict of anything shaped like an `XSessionState` (`logged_in`, `handle`, `login_wall`).
+
+    A function and not only a property because the callers that must agree (the `x.*` tools, the
+    card, the publisher, the trends collector) are tested with their own small stand-ins, and
+    because "one rule" is easier to keep when it has one name to import.
+    """
+    return verdict_of(
+        account_seen=bool(getattr(state, "logged_in", False) and getattr(state, "handle", None)),
+        logged_out_proof=bool(getattr(state, "login_wall", False)),
+    )
 
 
 @dataclass(frozen=True)
@@ -217,11 +282,13 @@ class XBrowserSource:
         token: str,
         client: httpx.AsyncClient | None = None,
         clock: Any = None,
+        sleep: Any = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._token = token
         self._client = client or httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0))
         self._clock = clock or (lambda: datetime.now(UTC))
+        self._sleep = sleep or asyncio.sleep
         # HEADFUL BEFORE THE FIRST READ, the way Reddit's adapter does it (D-026). A capsule
         # that restarted boots HEADLESS, and a headless Chrome is the one X is most likely to
         # refuse; the switch to INTERACTIVE + display_only is the capsule's own control call,
@@ -266,20 +333,46 @@ class XBrowserSource:
 
     # -- identity ----------------------------------------------------------------------------
 
-    async def session_state(self) -> XSessionState:
+    async def session_state(self, *, retries: int = SESSION_RETRIES) -> XSessionState:
         """Whether the capsule is logged into X, and as whom. NEVER guesses.
 
-        The handle comes from the "Profile" link in the logged-in navigation, the same place a
-        human looks. A failed read comes back as `logged_in=False` with a reason, not as silence:
-        result 2 requires a readable handling of a lost login, and silence is not handling.
+        THREE ANSWERS, not two (`state.verdict`): the account was seen (logged in), X showed its
+        login wall (logged out: the only proof of it), or the look established nothing (unknown).
+        A timeout, a capsule that does not answer and a page whose account link did not appear in
+        time are the third, and until 13.10.2026 they came back as "no session": `x.read` told the
+        agent the session of @demo_founder was gone for hours while the actuator published from it.
+
+        An unknown look for a transient reason is repeated `retries` times (once by default) before
+        it is reported: the second look is cheap, and the report of the first is a person asked to
+        sign in again for our own slow read. A platform refusal (403, 429) is not repeated, and
+        neither is a request the capsule rejected: more of the same changes nothing.
         """
+        state = await self._look_at_session()
+        for _ in range(max(0, retries)):
+            if state.verdict.definitive or not is_retryable(state.failure):
+                break
+            await self._sleep(SESSION_RETRY_PAUSE_S)
+            state = await self._look_at_session()
+        return state
+
+    async def _look_at_session(self) -> XSessionState:
+        """One read of `/home` as a session verdict. The handle comes from the "Profile" link in
+        the logged-in navigation, the same place a human looks."""
         now = self._clock()
         try:
             page = await self.home()
         except CredentialsMissing as exc:
             return XSessionState(False, None, now, error=str(exc)[:300], login_wall=True)
+        except XPlatformRefused as exc:
+            return XSessionState(
+                False, None, now, error=str(exc)[:300], failure=ReadFailure.PLATFORM_REFUSED.value
+            )
+        except XReadTransient as exc:
+            return XSessionState(False, None, now, error=str(exc)[:300], failure=exc.kind.value)
         except SourceUnavailable as exc:
-            return XSessionState(False, None, now, error=str(exc)[:300])
+            return XSessionState(
+                False, None, now, error=str(exc)[:300], failure=ReadFailure.REJECTED.value
+            )
         if page.logged_in and page.viewer:
             return XSessionState(True, page.viewer, now, error=None)
         # No login wall (that would have raised above) and no handle read. That is NOT a lost
@@ -294,16 +387,21 @@ class XBrowserSource:
                 + (f" ({'; '.join(page.limitations)})" if page.limitations else "")
                 + "."
             ),
+            failure=ReadFailure.UNREADABLE.value,
         )
 
-    async def verify_identity(self, expected_handle: str) -> XSessionState:
+    async def verify_identity(
+        self, expected_handle: str, *, retries: int = SESSION_RETRIES
+    ) -> XSessionState:
         """Whether the logged-in account is THE account a project expects.
 
         Separate from `session_state`, because "somebody is logged in" and "the right one is"
         are two questions, and confusing them means publishing from somebody else's account.
-        Case-insensitive, because X does not distinguish case in handles.
+        Case-insensitive, because X does not distinguish case in handles. `retries` is passed on:
+        a caller with a short budget of its own (the card, 10 s) passes 0 and reports the
+        unknown as it is.
         """
-        state = await self.session_state()
+        state = await self.session_state(retries=retries)
         if not state.logged_in or state.handle is None:
             return state
         expected = expected_handle.lstrip("@")
@@ -346,16 +444,26 @@ class XBrowserSource:
                 params=params,
                 headers={READER_TOKEN_HEADER: self._token},
             )
+        except httpx.TimeoutException as exc:
+            # A timeout says the capsule (or the page behind it) was slow, nothing about the
+            # session. It is its own class because the 12 and 13.10.2026 reads that timed out were
+            # reported to the agent as "the browser has no session" (see `session_state`).
+            raise XReadTransient(
+                f"czytnik kapsuły nie odpowiedział w czasie ({type(exc).__name__}) pod "
+                f"{self._base_url}",
+                ReadFailure.TIMEOUT,
+            ) from exc
         except httpx.HTTPError as exc:
-            raise SourceUnavailable(
-                f"czytnik kapsuły nieosiągalny ({type(exc).__name__}) pod {self._base_url}"
+            raise XReadTransient(
+                f"czytnik kapsuły nieosiągalny ({type(exc).__name__}) pod {self._base_url}",
+                ReadFailure.UNREACHABLE,
             ) from exc
         if response.status_code == 401:
             raise SourceUnavailable("czytnik kapsuły odrzucił token (401)")
         if response.status_code == 400:
             raise SourceUnavailable(f"czytnik kapsuły odmówił adresu {url!r}: {_detail(response)}")
         if response.status_code == 503:
-            raise SourceUnavailable("przeglądarka kapsuły nie jest dostępna")
+            raise XReadTransient("przeglądarka kapsuły nie jest dostępna", ReadFailure.UNREACHABLE)
         if response.status_code != 200:
             # THE PLATFORM'S CODE WHEN WE HAVE IT. The difference is the agent's decision: 429
             # and 403 mean "stop now", 5xx means "try later", and a capsule failure says nothing
@@ -363,6 +471,19 @@ class XBrowserSource:
             status = _platform_status(response)
             if status is not None:
                 raise XPlatformRefused(status, url, _detail(response))
+            if response.status_code == 504:
+                # The capsule's own deadline for the page ran out (`browser_timeout`).
+                raise XReadTransient(
+                    f"czytnik kapsuły: strona {url!r} nie skończyła się w czasie: "
+                    f"{_detail(response)}",
+                    ReadFailure.TIMEOUT,
+                )
+            if response.status_code >= 500:
+                raise XReadTransient(
+                    f"czytnik kapsuły odpowiedział {response.status_code} dla {url!r}: "
+                    f"{_detail(response)}",
+                    ReadFailure.UNREACHABLE,
+                )
             raise SourceUnavailable(
                 f"czytnik kapsuły odpowiedział {response.status_code} dla {url!r}: "
                 f"{_detail(response)}"

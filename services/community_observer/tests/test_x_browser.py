@@ -18,13 +18,19 @@ from community_observer.x_browser import (
     X_READ_PATH,
     XBrowserSource,
     XPlatformRefused,
+    XReadTransient,
     canonical_handle,
     page_from_json,
     parse_status_url,
 )
+from community_os_contracts.session_verdict import ReadFailure, SessionVerdict
 
 NOW = datetime(2026, 9, 26, 22, 0, tzinfo=UTC)
 BASE = "http://capsule:8765"
+
+
+async def _instantly(_seconds: float) -> None:
+    """The pause between a look at the session and its retry, without waiting for it."""
 
 
 def _source(handler) -> XBrowserSource:
@@ -35,7 +41,7 @@ def _source(handler) -> XBrowserSource:
         return handler(request)
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(capsule))
-    return XBrowserSource(BASE, token="t", client=client, clock=lambda: NOW)
+    return XBrowserSource(BASE, token="t", client=client, clock=lambda: NOW, sleep=_instantly)
 
 
 def _page(**fields) -> dict:
@@ -211,3 +217,148 @@ async def test_a_headless_capsule_is_switched_to_headful_before_the_first_read()
     await source.home()
     assert calls[:3] == [("GET", "/state"), ("POST", "/mode"), ("GET", X_READ_PATH)]
     assert calls[3:] == [("GET", X_READ_PATH)], "przełączenie raz, nie przed każdym odczytem"
+
+
+# ---------------------------------------------------------------------------------------------
+# THREE ANSWERS, NOT TWO (13.10.2026): a look that failed is UNKNOWN, never "no session"
+# ---------------------------------------------------------------------------------------------
+
+
+class _Capsule:
+    """A scripted capsule that counts the page reads it served (`/state` is not a read)."""
+
+    def __init__(self, *answers) -> None:
+        self.answers = list(answers)
+        self.reads = 0
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.reads += 1
+        answer = self.answers[min(self.reads, len(self.answers)) - 1]
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+
+def _logged_in() -> httpx.Response:
+    return httpx.Response(200, json=_page(viewer="demo_agent", logged_in=True))
+
+
+def _unread() -> httpx.Response:
+    return httpx.Response(200, json=_page(limitations=["Nie odczytano uchwytu konta z nawigacji."]))
+
+
+def _wall() -> httpx.Response:
+    return httpx.Response(200, json=_page(login_wall=True))
+
+
+def _capsule_timeout() -> httpx.Response:
+    return httpx.Response(
+        504, json={"error": "browser_timeout", "detail": "nawigacja", "platform_status": None}
+    )
+
+
+async def test_a_timeout_is_unknown_and_is_retried_once_never_a_lost_session() -> None:
+    """The incident: the capsule did not answer, and `x.read` told the agent the session of the
+    account was gone. A timeout says nothing about the session; it is looked at once more, and when
+    it persists it is reported as what it is."""
+    capsule = _Capsule(httpx.ReadTimeout("slow"), httpx.ReadTimeout("slow"))
+    state = await _source(capsule).session_state()
+    assert capsule.reads == 2, "one retry, not one look and not an endless loop"
+    assert state.verdict is SessionVerdict.UNKNOWN and state.unknown
+    assert not state.session_lost and not state.login_wall and not state.logged_in
+    assert state.failure == ReadFailure.TIMEOUT.value
+    assert "nie odpowiedział w czasie" in (state.error or "")
+
+
+async def test_a_hung_capsule_and_a_refusing_one_are_unknown_too() -> None:
+    """The listen queue of the hung capsule-x was full: `ConnectTimeout`. A capsule that is down
+    answers `ConnectError`. Neither is a statement about the session."""
+    hung = _Capsule(httpx.ConnectTimeout("hung"), httpx.ConnectTimeout("hung"))
+    state = await _source(hung).session_state()
+    assert hung.reads == 2
+    assert state.verdict is SessionVerdict.UNKNOWN
+    assert state.failure == ReadFailure.TIMEOUT.value
+    down = _Capsule(httpx.ConnectError("refused"), httpx.ConnectError("refused"))
+    state = await _source(down).session_state()
+    assert down.reads == 2
+    assert state.verdict is SessionVerdict.UNKNOWN
+    assert state.failure == ReadFailure.UNREACHABLE.value
+    assert "czytnik kapsuły nieosiągalny" in (state.error or "")
+
+
+async def test_the_second_look_settles_a_slow_first_one() -> None:
+    """The capsule's own page deadline (504) on the first look, the account on the second."""
+    capsule = _Capsule(_capsule_timeout(), _logged_in())
+    state = await _source(capsule).session_state()
+    assert capsule.reads == 2
+    assert state.verdict is SessionVerdict.LOGGED_IN and state.handle == "demo_agent"
+    assert state.failure is None and state.error is None
+
+
+async def test_an_unread_handle_is_unknown_retried_once_and_then_reported_as_unreadable() -> None:
+    capsule = _Capsule(_unread(), _unread())
+    state = await _source(capsule).session_state()
+    assert capsule.reads == 2
+    assert state.verdict is SessionVerdict.UNKNOWN and not state.login_wall
+    assert state.failure == ReadFailure.UNREADABLE.value
+    # ... and a handle that shows up on the second look is a session.
+    assert (await _source(_Capsule(_unread(), _logged_in())).session_state()).logged_in
+
+
+async def test_a_login_wall_is_the_only_logged_out_and_is_not_retried() -> None:
+    capsule = _Capsule(_wall(), _logged_in())
+    state = await _source(capsule).session_state()
+    assert capsule.reads == 1, "a wall is an ANSWER: looking again changes nothing"
+    assert state.verdict is SessionVerdict.LOGGED_OUT and state.session_lost
+    assert state.login_wall and state.failure is None
+
+
+@pytest.mark.parametrize(
+    ("answer", "failure"),
+    [
+        (
+            httpx.Response(502, json={"detail": "X odpowiedział 429", "platform_status": 429}),
+            ReadFailure.PLATFORM_REFUSED,
+        ),
+        (httpx.Response(401, json={"error": "token_rejected"}), ReadFailure.REJECTED),
+        (httpx.Response(400, json={"detail": "url_refused"}), ReadFailure.REJECTED),
+    ],
+)
+async def test_a_refusal_is_unknown_and_not_repeated(answer, failure) -> None:
+    """The platform asking us to stop, or the capsule rejecting the request: more of the same is
+    noise at best (and, for a 429, the exact thing the capsule's pacing exists to prevent)."""
+    capsule = _Capsule(answer, _logged_in())
+    state = await _source(capsule).session_state()
+    assert capsule.reads == 1
+    assert state.verdict is SessionVerdict.UNKNOWN and state.failure == failure.value
+
+
+async def test_a_caller_with_a_short_budget_of_its_own_can_ask_for_no_retry() -> None:
+    capsule = _Capsule(httpx.ReadTimeout("slow"), _logged_in())
+    state = await _source(capsule).session_state(retries=0)
+    assert capsule.reads == 1 and state.verdict is SessionVerdict.UNKNOWN
+    # `verify_identity` passes it on.
+    capsule = _Capsule(httpx.ReadTimeout("slow"), _logged_in())
+    await _source(capsule).verify_identity("@demo_agent", retries=0)
+    assert capsule.reads == 1
+
+
+async def test_a_read_that_timed_out_raises_the_transient_class_with_its_kind() -> None:
+    """`SourceUnavailable` for every old caller, and a kind for the ones that decide by it."""
+    with pytest.raises(XReadTransient) as slow:
+        await _source(_Capsule(httpx.ReadTimeout("slow"))).read("https://x.com/home")
+    assert isinstance(slow.value, SourceUnavailable)
+    assert slow.value.kind is ReadFailure.TIMEOUT
+    with pytest.raises(XReadTransient) as gone:
+        await _source(_Capsule(httpx.ConnectError("refused"))).read("https://x.com/home")
+    assert gone.value.kind is ReadFailure.UNREACHABLE
+    with pytest.raises(XReadTransient) as unavailable:
+        await _source(_Capsule(httpx.Response(503, json={}))).read("https://x.com/home")
+    assert unavailable.value.kind is ReadFailure.UNREACHABLE
+
+
+async def test_the_state_says_its_verdict_in_json() -> None:
+    state = await _source(_Capsule(httpx.ReadTimeout("slow"))).session_state(retries=0)
+    payload = state.to_json()
+    assert payload["verdict"] == "UNKNOWN" and payload["failure"] == "TIMEOUT"
+    assert payload["login_wall"] is False

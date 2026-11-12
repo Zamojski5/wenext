@@ -498,10 +498,10 @@ async def test_the_catalog_a_host_agent_lists_is_the_narrow_one(pool, tenant) ->
     listed = await registry.call("catalog.list", {})
     names = {entry["name"] for entry in listed["narzedzia"]}
 
-    assert listed["liczba"] == 47 == len(names)
+    assert listed["liczba"] == 48 == len(names)
     assert "drafts.publish" not in names and "session.handoff" not in names
     wenext_run = await _registry(pool, choice, session.id, None).call("catalog.list", {})
-    assert wenext_run["liczba"] == 54
+    assert wenext_run["liczba"] == 55
 
 
 # ---------------------------------------------------------------------------

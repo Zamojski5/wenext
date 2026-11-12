@@ -102,6 +102,7 @@ TOOL_VERBS: dict[str, str] = {
     "threads.list": "przejrzał listę wątków",
     "memory.search": "poszukał w pamięci projektu",
     "memory.write": "zapisał ustalenie",
+    "playbook.read": "sprawdził, co się sprawdziło w dotychczasowych odpowiedziach",
     "knowledge.search": "poszukał w materiałach",
     "knowledge.add": "dodał materiał",
     "draft.create": "przygotował propozycję tekstu",
@@ -155,6 +156,22 @@ TOOL_VERBS: dict[str, str] = {
     "room.send_token": "przygotował potwierdzenie wysyłki z karty",
     "room.send_draft": "wysłał szkic z karty po kliknięciu człowieka",
     "room.send_status": "sprawdził, co się stało z wysyłką z karty",
+    # Narzędzia karty, część druga (`tools/card_actions.py`): poprawka tekstu i zmiany zakresu.
+    "room.revise_draft": "zapisał poprawkę człowieka jako nową wersję szkicu",
+    "room.scope_token": "przygotował potwierdzenie zmiany zakresu z karty",
+    "room.pause": "wstrzymał zakres z karty po kliknięciu człowieka",
+    "room.resume": "wznowił zakres z karty po kliknięciu człowieka",
+    "room.sign_scope": "podpisał nowy zakres z karty po kliknięciu człowieka",
+    # Narzędzia karty, część trzecia (`tools/card_connect.py`): połączenie konta z karty.
+    "room.connect_token": "przygotował potwierdzenie otwarcia okna logowania z karty",
+    "room.connect_account": "otworzył okno logowania agenta po kliknięciu człowieka",
+    "room.connect_done": "sprawdził sesję po tym, jak człowiek się zalogował",
+    "room.account_status": "sprawdził, czy konta mają sesję w przeglądarce agenta",
+    # Narzędzia karty, część czwarta (`tools/card_batch.py`): wysyłka całej sprawdzonej paczki.
+    "room.batch_token": "ułożył plan wysyłki paczki z karty i przygotował potwierdzenie",
+    "room.send_batch": "wysłał paczkę szkiców z karty po jednym kliknięciu człowieka",
+    # Narzędzia karty, część piąta (`tools/card_pictures.py`): obrazy autorów i postów.
+    "room.pictures": "pobrał małe obrazy autorów i postów dla karty",
 }
 
 
@@ -270,6 +287,17 @@ def short_result(result: Any) -> Any:
     }
 
 
+def _call_id_of(item: dict[str, Any]) -> dict[str, str]:
+    """`{"call_id": ...}` when the item has an id, else nothing.
+
+    The id is how `registry._already_done` pairs a call row with ITS OWN result row. The engine's
+    `mcpToolCall` item has one; the plugin tool server mints one per call. An item with none
+    writes neither key, and `_already_done` falls back to adjacency for such a pair.
+    """
+    ident = item.get("id")
+    return {"call_id": str(ident)} if ident else {}
+
+
 def tool_call_payload(item: dict[str, Any]) -> dict[str, Any]:
     """The `TOOL_CALL` payload for one tool call, from an engine-shaped item.
 
@@ -285,6 +313,7 @@ def tool_call_payload(item: dict[str, Any]) -> dict[str, Any]:
     return {
         "tool": tool,
         "server": item.get("server"),
+        **_call_id_of(item),
         "arguments": arguments,
         # JEDNO ZDANIE DLA CZŁOWIEKA, obok danych dla maszyny. Bez niego lista „co agent robił"
         # rozwija się do identyfikatorów narzędzi, a to nie jest odpowiedź na pytanie, co robił.
@@ -306,6 +335,7 @@ def tool_result_payload(item: dict[str, Any]) -> dict[str, Any]:
     tool = str(item.get("tool") or "?")
     return {
         "tool": tool,
+        **_call_id_of(item),
         "status": item.get("status"),
         "error": item.get("error"),
         "duration_ms": item.get("durationMs"),

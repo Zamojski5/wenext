@@ -757,3 +757,14 @@ def test_the_snowflake_epoch_is_the_writers() -> None:
     from browser_supervisor import x_reader, x_writer
 
     assert x_reader.SNOWFLAKE_EPOCH_MS == x_writer.SNOWFLAKE_EPOCH_MS
+
+
+def test_the_reader_waits_for_the_account_link_as_long_as_the_actuator_does() -> None:
+    """THE SAME LINK, THE SAME PATIENCE (13.10.2026). The reader gave the navigation 2 s to show the
+    account link while the actuator gave it 10 s, so a slow page the actuator could publish from came
+    back from the reader as "no account read", which the control plane turned into "the browser has
+    no session". The two numbers are one rule written twice; this keeps them one."""
+    from browser_supervisor.x_reader import VIEWER_WAIT_MS
+    from browser_supervisor.x_writer import STEP_TIMEOUT_S
+
+    assert int(STEP_TIMEOUT_S * 1000) == VIEWER_WAIT_MS

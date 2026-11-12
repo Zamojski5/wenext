@@ -18,6 +18,9 @@ from __future__ import annotations
 import pytest
 from browser_supervisor.actuator_check import ACCOUNT, _www_thread_page
 from browser_supervisor.writer import (
+    ACCOUNT_NOT_READ,
+    ACCOUNT_SECOND_LOOK_MIN_LEFT_S,
+    NOT_LOGGED_IN,
     WWW_COMMENT,
     WWW_COMPOSER_HOST,
     WWW_COMPOSER_TEXT,
@@ -495,3 +498,166 @@ def test_a_page_of_another_account_is_blocked_before_anything_is_typed(entry) ->
 
     assert not [one for one in page.log if one.startswith("fill:")], "nic nie wpisano"
     assert "click" not in page.log
+
+
+# ---------------------------------------------------------------------------------------------
+# 13.10.2026: "the page does not show the account" is not "the account is logged out"
+# ---------------------------------------------------------------------------------------------
+
+
+class _SilentAccountPage(_FakeWwwPage):
+    """A thread page on which `rs-current-user` has not shown up (a slow hydration), and which
+    shows it after a reload when `hydrates_after_reload`. Records every reload."""
+
+    def __init__(self, *, hydrates_after_reload: bool) -> None:
+        super().__init__(account_on_page=ACCOUNT)
+        self._hydrated = False
+        self._hydrates_after_reload = hydrates_after_reload
+
+    def locator(self, selector: str):
+        if selector == WWW_CURRENT_USER and not self._hydrated:
+            return self._one([], selector)
+        return super().locator(selector)
+
+    def reload(self, wait_until: str = "load", timeout: float | None = None) -> None:
+        self.log.append("reload")
+        self._hydrated = self._hydrates_after_reload
+
+
+def test_an_account_that_never_shows_up_is_not_called_a_logout() -> None:
+    """The incident: the card said connected (the reader's `/api/me.json` answered with the
+    account) while this actuator refused with "the page does not show a logged-in account", and
+    the request ended SKIPPED with its single-use consent spent. Without a sign of a logout there is
+    no logout to report; nothing was typed, and the sentence says what happened."""
+    page = _SilentAccountPage(hydrates_after_reload=False)
+
+    with pytest.raises(CommentRefused) as refused:
+        _actuator(page).comment_www(
+            thread_url=page.url,
+            parent_fullname="t3_abc123",
+            text="Body",
+            account=ACCOUNT,
+            timeout_s=45,
+        )
+
+    assert str(refused.value) == ACCOUNT_NOT_READ
+    assert "nie jest potwierdzone wylogowanie" in str(refused.value)
+    assert NOT_LOGGED_IN not in str(refused.value)
+    assert refused.value.submit_started is False
+    assert page.log.count("reload") == 1, "one second look, not a loop"
+    assert not [one for one in page.log if one.startswith("fill:") or one == "click"]
+
+
+def test_a_second_look_after_a_reload_settles_a_slow_hydration() -> None:
+    page = _SilentAccountPage(hydrates_after_reload=True)
+
+    result = _actuator(page).comment_www(
+        thread_url=page.url,
+        parent_fullname="t3_abc123",
+        text="Body",
+        account=ACCOUNT,
+        timeout_s=45,
+    )
+
+    assert result.fullname == "t1_n1"
+    assert page.log.index("reload") < page.log.index("fill:Body") < page.log.index("click")
+
+
+def test_the_second_look_needs_room_in_the_acts_budget() -> None:
+    """A reload on a page that already used the act's time would stretch the act past what the
+    control plane waits for (75 s, then UNKNOWN). Without room there is no second look."""
+    page = _SilentAccountPage(hydrates_after_reload=True)
+
+    with pytest.raises(CommentRefused) as refused:
+        _actuator(page).comment_www(
+            thread_url=page.url,
+            parent_fullname="t3_abc123",
+            text="Body",
+            account=ACCOUNT,
+            timeout_s=ACCOUNT_SECOND_LOOK_MIN_LEFT_S - 1,
+        )
+
+    assert str(refused.value) == ACCOUNT_NOT_READ
+    assert "reload" not in page.log
+
+
+class _OldInterfacePage:
+    """The old interface's thread page, only as far as the account check: the element that holds
+    the account name (or the "log in" link in its place) is scripted per look."""
+
+    url = "https://old.reddit.com/r/testsub/comments/abc123/"
+
+    def __init__(self, *looks: str | None) -> None:
+        self._looks = list(looks)
+        self.log: list[str] = []
+        self.closed = False
+
+    def goto(self, url: str, wait_until: str = "load", timeout: float | None = None):
+        return _FakeResponse(200)
+
+    def reload(self, wait_until: str = "load", timeout: float | None = None) -> None:
+        self.log.append("reload")
+
+    def locator(self, selector: str):
+        assert selector == "#header-bottom-right span.user a", selector
+        page = self
+
+        class _Name:
+            @property
+            def first(self):
+                return self
+
+            def count(self) -> int:
+                return 0 if page._current() is None else 1
+
+            def text_content(self, timeout: float | None = None) -> str | None:
+                return page._current()
+
+        return _Name()
+
+    def _current(self) -> str | None:
+        # Each READ of the account consumes one scripted look; a reload does not.
+        return self._looks[0] if len(self._looks) == 1 else self._looks.pop(0)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _old_actuator(page: _OldInterfacePage) -> CdpCommentActuator:
+    driver = _FakeDriver(page)  # type: ignore[arg-type]
+    return CdpCommentActuator("http://127.0.0.1:1", driver=lambda: driver, url_policy=lambda u: u)
+
+
+def _old_comment(page: _OldInterfacePage, *, timeout_s: float = 45):
+    return _old_actuator(page).comment(
+        thread_url=page.url,
+        parent_fullname="t3_abc123",
+        text="Body",
+        account=ACCOUNT,
+        timeout_s=timeout_s,
+    )
+
+
+def test_the_old_interface_says_logged_out_only_for_a_login_link() -> None:
+    """The old interface shows a "log in" link where the account name should be: THAT is the sign
+    of a logout, and the only thing that keeps the old sentence. An empty place is unread."""
+    link = _OldInterfacePage("login")
+    with pytest.raises(CommentRefused) as refused:
+        _old_comment(link)
+    assert str(refused.value) == NOT_LOGGED_IN and "reload" not in link.log, "a wall is final"
+
+    empty = _OldInterfacePage(None)
+    with pytest.raises(CommentRefused) as refused:
+        _old_comment(empty)
+    assert str(refused.value) == ACCOUNT_NOT_READ and empty.log == ["reload"]
+
+    # The second look may find the answer: after the reload the link is there.
+    late = _OldInterfacePage(None, "login")
+    with pytest.raises(CommentRefused) as refused:
+        _old_comment(late)
+    assert str(refused.value) == NOT_LOGGED_IN and late.log == ["reload"]
+
+    other = _OldInterfacePage("somebodyelse")
+    with pytest.raises(CommentBlocked):
+        _old_comment(other)
+    assert other.log == [], "another account is a block at once, nothing to look at twice"

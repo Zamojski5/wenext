@@ -21,11 +21,12 @@ tick whatever they like, and this click chooses for them, so it leaves a stop al
 the clicked draft is always in the scope, so the click can always send what it was pressed for.
 
 THE LIMITS DID NOT MOVE, AND THAT IS ON PURPOSE. A scope for two accounts keeps the product's
-pilot pace: one publication an hour and six a day. `budget.spent` counts the publications of EVERY
-account of the scope together (and the queue by project), so these numbers bind the whole project,
-not each account: covering more accounts raises nobody's pace, and the worst case (every text from
-one account) is the one the single-account scope already had. Nothing here raises them; a person who
-wants more says so in Obecność, where the number is typed and signed.
+pilot pace: one publication an hour and six a day, ONE shared bucket (a budget with no per-account
+limit is read exactly as it always was: `budget.spent` counts the publications of EVERY account of
+the scope together, and the queue by project). Covering more accounts raises nobody's pace, and the
+worst case (every text from one account) is the one the single-account scope already had. Nothing
+here raises them; a person who wants more says so in the card's Limits panel (since v11 a number
+PER ACCOUNT, `plan_limits`) or in Obecność, where the number is typed and signed.
 
 IT IS THE EXISTING SIGNATURE, NOT A LIGHTER ONE. `PresenceStore.sign` is what the dashboard's
 form calls: the same row in `project_delegations`, the same digest over mode, scope, budget and
@@ -49,9 +50,24 @@ THREE CASES, AND ONLY THREE (`plan_consent`):
     with one click in a chat would let that account publish with nobody looking, which the sentence
     on the card does not say.
 
-A PAUSE IS A STOP, AND A CLICK DOES NOT LIFT IT. A paused signature is refused (`ZAKRES_WSTRZYMANY`)
-and the person resumes it where they paused it. Replacing it with a fresh signature from a card
-would turn the stop button into a suggestion.
+A PAUSE IS A STOP, AND ONLY ONE CLICK LIFTS IT (v9, 11.10). A SEND click never does: a paused
+signature is refused (`ZAKRES_WSTRZYMANY`), and so is signing a fresh scope over it, because that
+would turn the stop button into a suggestion. What lifts it is the card's own "Wznow" control, a
+dedicated two-step click behind a one-time token (`tools/card_actions.py`: `room.scope_token`, then
+`room.resume`), which sets `paused_at` back to NULL on the SAME signature and writes the audit row.
+The model has no tool that resumes, signs or pauses; the card's three are app-only. A pause from
+the card is the same shape (`plan_pause`), and it also interrupts the background sessions.
+
+THE CARD CAN NOW SET THE LIMITS ITSELF (v9, 11.10, the founder's day: he had to find the Obecnosc
+page, revoke, find a hidden manual form, tick five boxes and type three numbers, and the first
+attempt saved an EMPTY scope). `plan_limits` builds that signature from what the person ticked
+in the card's panel: always REVIEW (every text waits for a click), the accounts they chose out of
+the project's assigned ones (the server checks each one against the database and the platform
+matrix; the card's ids are inert until then), the actions they chose, three limits inside fixed
+bounds and a term of 7 or 14 days. An empty list of accounts or of actions is refused, never
+saved: a scope that permits nothing is a signature that looks like a permission. It replaces the
+old signature through the same `PresenceStore.sign`, behind the same token, and it refuses while a
+request still waits in the publisher's queue, exactly as `CONSENT_WIDEN` does.
 
 WHO THE SIGNER IS. The process that serves the card is the plugin's tool server, which has no
 operator session and must not get one. The signature is filed under the organization's single
@@ -78,11 +94,19 @@ from control_plane.pilot.publication import PublicationStore
 from control_plane.sessions.store import EVENT_INTERRUPT, SESSION_PRESENCE, SessionStore
 from control_plane.workspace.platforms import support_for
 
-from .budget import DEFAULT_PUBLICATIONS_PER_DAY, DEFAULT_PUBLICATIONS_PER_HOUR
+from .budget import (
+    DEFAULT_PUBLICATIONS_PER_DAY,
+    DEFAULT_PUBLICATIONS_PER_HOUR,
+    effective_limits,
+    limits_for,
+)
 from .scope import (
+    ACTION_OWN_POST,
     ACTION_REPLY,
+    ACTION_RESEARCH,
     DEFAULT_TERM,
     MODE_REVIEW,
+    AccountCaps,
     Budget,
     Scope,
     action_supported,
@@ -92,10 +116,25 @@ from .store import DelegationRow, PresenceStore
 CONSENT_SEND = "WYSLIJ"
 CONSENT_SIGN = "PODPISZ"
 CONSENT_WIDEN = "ROZSZERZ"
+#: The card's own controls over the scope (v9): pause it, resume a paused one, replace it with the
+#: limits the person set in the panel. None of them is reachable from a send click.
+CONSENT_PAUSE = "WSTRZYMAJ"
+CONSENT_RESUME = "WZNOW"
+CONSENT_SET = "USTAW"
+#: The kinds that write a NEW signature (`PresenceStore.sign`). Pause and resume only move
+#: `paused_at`.
+SIGNING_KINDS = frozenset({CONSENT_SIGN, CONSENT_WIDEN, CONSENT_SET})
 
 REFUSED_PAUSED = "ZAKRES_WSTRZYMANY"
 REFUSED_MODE = "ZAKRES_INNY_TRYB"
 REFUSED_QUEUE = "ZAKRES_KOLEJKA"
+REFUSED_EMPTY = "ZAKRES_PUSTY"
+REFUSED_NO_SCOPE = "BRAK_ZAKRESU"
+REFUSED_NOT_ACTIVE = "NIE_AKTYWNY"
+REFUSED_NOT_PAUSED = "NIE_WSTRZYMANY"
+REFUSED_EXPIRED = "ZAKRES_WYGASL"
+REFUSED_ACCOUNT = "KONTO_NIEZNANE"
+REFUSED_LIMITS = "LIMIT_POZA_GRANICA"
 
 #: A widened signature keeps the old deadline, but not one that is about to run out: a scope that
 #: ends in a minute is not a thing to hand somebody who has just agreed to a week.
@@ -157,7 +196,7 @@ class ConsentPlan:
 
     @property
     def signs(self) -> bool:
-        return self.kind != CONSENT_SEND
+        return self.kind in SIGNING_KINDS
 
     def basis(self) -> str:
         """The string the token binds: the kind, the signature it was planned against and, for a
@@ -176,7 +215,7 @@ class ConsentPlan:
 
     def to_json(self) -> dict[str, Any]:
         """What the card tells the person. Limits are the ones that will bind, as numbers."""
-        return {
+        out: dict[str, Any] = {
             "rodzaj": self.kind,
             "tryb": self.mode,
             "wygasa": self.expires_at.isoformat() if self.expires_at else None,
@@ -186,6 +225,10 @@ class ConsentPlan:
             },
             "konta": [account.to_json() for account in self.accounts],
         }
+        rows = account_limit_rows(self.budget, self.accounts)
+        if rows:
+            out["limity_kont"] = rows
+        return out
 
 
 def minimal_budget() -> Budget:
@@ -199,6 +242,27 @@ def minimal_budget() -> Budget:
         publications_per_day=DEFAULT_PUBLICATIONS_PER_DAY,
         publications_per_hour=DEFAULT_PUBLICATIONS_PER_HOUR,
     )
+
+
+def account_limit_rows(budget: Budget, accounts: Iterable[ConsentAccount]) -> list[dict[str, Any]]:
+    """What binds each account, in the card's words, for a budget with limits PER ACCOUNT (v11).
+
+    Empty for a budget with one shared bucket: the card then tells the project's numbers, as it
+    always did. `zrodlo` says which level each number came from (`account`, `platform` or
+    `project`), so the panel can show what the person did not set.
+    """
+    limits = effective_limits(budget)
+    if not limits.per_account:
+        return []
+    return [
+        {
+            "id": str(account.account_id),
+            "platforma": account.platform,
+            "konto": account.handle,
+            **limits_for(limits, account.account_id, account.platform).to_json(),
+        }
+        for account in accounts
+    ]
 
 
 def _term(now: datetime) -> datetime:
@@ -303,8 +367,8 @@ def plan_consent(
         # gone. Replacing it with a fresh signature would lift the pause with a click.
         raise CardConsentRefused(
             REFUSED_PAUSED,
-            "Zakres tego projektu jest wstrzymany. Wznów go w Obecności: wstrzymanie to Twój "
-            "stop i kliknięcie w karcie go nie zdejmuje.",
+            "Zakres tego projektu jest wstrzymany. Wznów go przyciskiem Wznów w karcie (albo w "
+            "Obecności): wstrzymanie to Twój stop i samo wysłanie go nie zdejmuje.",
         )
     if not delegation.signer_active:
         return minimal()
@@ -322,8 +386,8 @@ def plan_consent(
         raise CardConsentRefused(
             REFUSED_MODE,
             f"Zakres tego projektu działa w trybie {delegation.mode} i nie obejmuje tego konta. "
-            "Dodaj je w Obecności: z karty dodaję konta tylko do zakresu, w którym każdy tekst "
-            "czeka na Twoje kliknięcie.",
+            "Ustaw go w karcie przyciskiem Limity: podpisze zakres, w którym każdy tekst czeka na "
+            "Twoje kliknięcie, razem z tym kontem.",
         )
     kept = delegation.expires_at
     expires_at = kept if kept is not None and kept > moment + _MIN_KEPT_TERM else _term(moment)
@@ -344,6 +408,465 @@ def plan_consent(
         replaces=delegation.id,
         accounts=added,
     )
+
+
+#: What the card's panel starts from, and the most it will sign. The product's own defaults
+#: (`budget.py`: 1 an hour, 6 a day, 1 own post) are the pilot pace for a NEW account; a person who
+#: has used the product for a while wants more, and these bounds are where "more" stops being a
+#: decision a click in a chat should make (the dashboard form has no bound, and stays the place for
+#: a larger number). Written out, so a later change of the defaults does not move what is offered.
+CARD_LIMIT_DEFAULTS = {"godzina": 2, "doba": 10, "wlasne_doba": 1, "dni": 7}
+CARD_LIMIT_BOUNDS = {"godzina": 10, "doba": 50, "wlasne_doba": 10}
+CARD_TERMS_DAYS = (7, 14)
+#: The actions the panel offers, in the order it draws them.
+CARD_ACTIONS = (ACTION_REPLY, ACTION_OWN_POST, ACTION_RESEARCH)
+
+_PUBLISHING_ACTIONS = (ACTION_REPLY, ACTION_OWN_POST)
+
+
+def scope_state(delegation: DelegationRow | None) -> str:
+    """What the card says about the scope in one word: AKTYWNY, WSTRZYMANY, WYGASL or BRAK.
+
+    BRAK is "nothing the card can lean on": no signature, a revoked one, or one whose signer is
+    gone (the next send re-signs it, `plan_consent`). An expired signature is WYGASL even when it
+    was paused: nothing can be resumed on it.
+    """
+    if delegation is None or not delegation.signer_active:
+        return "BRAK"
+    if delegation.expired:
+        return "WYGASL"
+    if delegation.paused_at is not None:
+        return "WSTRZYMANY"
+    return "AKTYWNY"
+
+
+def _names(accounts: Iterable[ConsentAccount]) -> list[dict[str, str]]:
+    return [account.to_json() for account in accounts]
+
+
+def plan_pause(
+    delegation: DelegationRow | None, *, named: Sequence[ConsentAccount] = ()
+) -> ConsentPlan:
+    """The pause the card's control asks for. PURE. Needs a live signature: a paused, expired or
+    missing one has nothing to stop (`BRAK_ZAKRESU`, `NIE_AKTYWNY`). `named` is as in
+    `plan_resume`."""
+    if delegation is None or not delegation.signer_active:
+        raise CardConsentRefused(
+            REFUSED_NO_SCOPE, "Ten projekt nie ma podpisanego zakresu, więc nie ma czego wstrzymać."
+        )
+    if not delegation.live:
+        raise CardConsentRefused(
+            REFUSED_NOT_ACTIVE,
+            "Zakres tego projektu już jest wstrzymany albo wygasł, więc nie ma czego wstrzymać.",
+        )
+    return ConsentPlan(
+        kind=CONSENT_PAUSE,
+        delegation_id=delegation.id,
+        mode=delegation.mode,
+        scope=delegation.scope,
+        budget=delegation.budget,
+        expires_at=delegation.expires_at,
+        replaces=None,
+        accounts=tuple(named),
+    )
+
+
+def plan_resume(
+    delegation: DelegationRow | None, *, named: Sequence[ConsentAccount]
+) -> ConsentPlan:
+    """The resume the card's control asks for. PURE. Only a PAUSED, not expired signature can be
+    resumed, and it comes back as it was: same mode, same accounts, same limits, same deadline.
+
+    `named` are the accounts of the scope the SERVER could resolve, for the sentence the person
+    reads; the plan carries them and the card only draws them.
+    """
+    if delegation is None or not delegation.signer_active:
+        raise CardConsentRefused(
+            REFUSED_NO_SCOPE, "Ten projekt nie ma podpisanego zakresu, więc nie ma czego wznawiać."
+        )
+    if delegation.expired:
+        raise CardConsentRefused(
+            REFUSED_EXPIRED,
+            "Zakres tego projektu wygasł, a wygasłego nie da się wznowić. Ustaw nowy w karcie "
+            "przyciskiem Limity.",
+        )
+    if delegation.paused_at is None:
+        raise CardConsentRefused(
+            REFUSED_NOT_PAUSED,
+            "Zakres tego projektu nie jest wstrzymany, więc nie ma czego wznawiać.",
+        )
+    return ConsentPlan(
+        kind=CONSENT_RESUME,
+        delegation_id=delegation.id,
+        mode=delegation.mode,
+        scope=delegation.scope,
+        budget=delegation.budget,
+        expires_at=delegation.expires_at,
+        replaces=None,
+        accounts=tuple(named),
+    )
+
+
+def plan_limits(
+    delegation: DelegationRow | None,
+    *,
+    assigned: Sequence[ConsentAccount],
+    chosen: Iterable[UUID],
+    actions: Iterable[str],
+    limits: dict[str, int] | None,
+    days: int | None,
+    now: datetime | None = None,
+    account_limits: dict[str, dict[str, int]] | None = None,
+) -> ConsentPlan:
+    """The signature the card's panel asks for, from what the person ticked. PURE.
+
+    LIMITS PER ACCOUNT (v11): `account_limits` is `{account id: {godzina, doba, wlasne_doba}}`,
+    the card's three numbers for each ticked account (replies per hour, replies per day, own posts
+    per day; the first two count replies only, own posts are counted apart). Given, the scope is
+    signed with a number for EVERY chosen account (one the card left out gets `limits`, else the
+    card's defaults) and NO overall ceiling: each account's pace is its own. Not given, the three
+    numbers of `limits` are ONE shared bucket, as before. An entry for an account that was not
+    chosen is refused: a limit for nobody is a signature that looks like a permission.
+
+    Everything the card sent is checked here against rows the SERVER read: each chosen account must
+    be assigned to the project (`assigned`), not stopped, and able to do every publishing action
+    that was chosen (the platform matrix); a list that ends up empty is refused (`ZAKRES_PUSTY`),
+    as is a limit outside `CARD_LIMIT_BOUNDS` and a term that is not 7 or 14 days. The mode is
+    always REVIEW: a click in a chat never hands the agent a scope that posts unseen. The old
+    scope's communities are kept (the collector observes them); nothing new is added.
+
+    A scope that is PAUSED and still running is not replaced here: signing a fresh one over it would
+    lift the pause (`ZAKRES_WSTRZYMANY`, resume first).
+    """
+    moment = now or datetime.now(UTC)
+    if (
+        delegation is not None
+        and delegation.signer_active
+        and not delegation.expired
+        and delegation.paused_at is not None
+    ):
+        raise CardConsentRefused(
+            REFUSED_PAUSED,
+            "Zakres tego projektu jest wstrzymany. Najpierw go wznów przyciskiem Wznów, "
+            "potem zmieniaj limity: wstrzymanie to Twój stop i nowy podpis go nie zdejmuje.",
+        )
+    wanted_actions = sorted({str(a).strip().upper() for a in actions})
+    unknown = [a for a in wanted_actions if a not in CARD_ACTIONS]
+    if unknown:
+        raise CardConsentRefused(REFUSED_EMPTY, f"Nieznane działania: {', '.join(unknown)}.")
+    chosen_ids = {UUID(str(one)) for one in chosen}
+    if not wanted_actions:
+        raise CardConsentRefused(
+            REFUSED_EMPTY,
+            "Zaznacz co najmniej jedno działanie. Zakres bez działań nic nie pozwala robić.",
+        )
+    if not chosen_ids:
+        raise CardConsentRefused(
+            REFUSED_EMPTY,
+            "Zaznacz co najmniej jedno konto. Zakres bez kont nic nie pozwala robić.",
+        )
+    by_id = {account.account_id: account for account in assigned}
+    needed = [a for a in wanted_actions if a in _PUBLISHING_ACTIONS]
+    picked: list[ConsentAccount] = []
+    for account_id in sorted(chosen_ids, key=str):
+        account = by_id.get(account_id)
+        if account is None or account.state in STOPPED_STATES:
+            raise CardConsentRefused(
+                REFUSED_ACCOUNT,
+                "To konto nie należy do projektu albo jest zatrzymane, więc nie wejdzie "
+                "do zakresu.",
+            )
+        support = support_for(account.platform)
+        if not all(action_supported(action, support) for action in needed):
+            raise CardConsentRefused(
+                REFUSED_ACCOUNT,
+                f"Konto {account.handle} ({account.platform}) nie umie dziś wykonać wszystkich "
+                "zaznaczonych działań. Odznacz je albo to konto.",
+            )
+        picked.append(account)
+    picked.sort(key=lambda a: (a.platform, a.handle, str(a.account_id)))
+
+    asked = dict(limits or {})
+    unknown_keys = sorted(set(asked) - set(CARD_LIMIT_BOUNDS))
+    if unknown_keys:
+        raise CardConsentRefused(REFUSED_LIMITS, f"Nieznane limity: {', '.join(unknown_keys)}.")
+    values: dict[str, int] = {}
+    for key, bound in CARD_LIMIT_BOUNDS.items():
+        raw = asked.get(key, CARD_LIMIT_DEFAULTS[key])
+        if isinstance(raw, bool) or not isinstance(raw, int) or not 1 <= raw <= bound:
+            raise CardConsentRefused(
+                REFUSED_LIMITS,
+                f"Limit „{key}” musi być liczbą od 1 do {bound}. Większy ustawisz w Obecności.",
+            )
+        values[key] = raw
+    if values["godzina"] > values["doba"] or values["wlasne_doba"] > values["doba"]:
+        raise CardConsentRefused(
+            REFUSED_LIMITS,
+            "Limit na godzinę i limit własnych postów nie mogą być większe niż limit na dobę.",
+        )
+    term = CARD_LIMIT_DEFAULTS["dni"] if days is None else days
+    if isinstance(term, bool) or term not in CARD_TERMS_DAYS:
+        raise CardConsentRefused(REFUSED_LIMITS, "Termin to 7 albo 14 dni.")
+    if account_limits:
+        budget = _per_account_budget(account_limits, picked=picked, fallback=values)
+    else:
+        budget = Budget(
+            publications_per_day=values["doba"],
+            publications_per_hour=values["godzina"],
+            own_posts_per_day=values["wlasne_doba"],
+        )
+
+    return ConsentPlan(
+        kind=CONSENT_SET,
+        delegation_id=delegation.id if delegation is not None else None,
+        mode=MODE_REVIEW,
+        scope=Scope(
+            accounts=_sorted({a.account_id for a in picked}),
+            communities=tuple(delegation.scope.communities) if delegation is not None else (),
+            actions=_sorted(set(wanted_actions)),
+        ),
+        budget=budget,
+        expires_at=(moment + timedelta(days=term)).replace(microsecond=0),
+        replaces=delegation.id if delegation is not None else None,
+        accounts=tuple(picked),
+    )
+
+
+def _per_account_budget(
+    asked: dict[str, dict[str, int]], *, picked: Sequence[ConsentAccount], fallback: dict[str, int]
+) -> Budget:
+    """The budget of a scope with a number for every chosen account. PURE; every number is checked
+    against `CARD_LIMIT_BOUNDS` exactly as the shared three are."""
+    chosen = {account.account_id for account in picked}
+    entries: dict[UUID, AccountCaps] = {}
+    for raw_id, raw_caps in asked.items():
+        try:
+            account_id = UUID(str(raw_id))
+        except ValueError as exc:
+            raise CardConsentRefused(
+                REFUSED_LIMITS, "Limity kont: klucz nie jest identyfikatorem konta."
+            ) from exc
+        if account_id not in chosen:
+            raise CardConsentRefused(
+                REFUSED_LIMITS,
+                "Limit dla konta, którego nie zaznaczono. Zaznacz konto albo usuń jego limit.",
+            )
+        if not isinstance(raw_caps, dict):
+            raise CardConsentRefused(REFUSED_LIMITS, "Limity konta to obiekt z liczbami.")
+        unknown = sorted(set(raw_caps) - set(CARD_LIMIT_BOUNDS))
+        if unknown:
+            raise CardConsentRefused(
+                REFUSED_LIMITS, f"Nieznane limity konta: {', '.join(unknown)}."
+            )
+        entries[account_id] = _caps_of(raw_caps, fallback)
+    for account_id in chosen - set(entries):
+        entries[account_id] = _caps_of({}, fallback)
+    return Budget(account_limits=tuple(sorted(entries.items(), key=lambda pair: str(pair[0]))))
+
+
+def _caps_of(raw: dict[str, Any], fallback: dict[str, int]) -> AccountCaps:
+    values: dict[str, int] = {}
+    for key, bound in CARD_LIMIT_BOUNDS.items():
+        value = raw.get(key, fallback[key])
+        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= bound:
+            raise CardConsentRefused(
+                REFUSED_LIMITS,
+                f"Limit „{key}” konta musi być liczbą od 1 do {bound}. "
+                "Większy ustawisz w Obecności.",
+            )
+        values[key] = value
+    if values["godzina"] > values["doba"] or values["wlasne_doba"] > values["doba"]:
+        raise CardConsentRefused(
+            REFUSED_LIMITS,
+            "Limit na godzinę i limit własnych postów konta nie mogą być większe niż jego limit "
+            "na dobę.",
+        )
+    return AccountCaps(
+        replies_per_hour=values["godzina"],
+        replies_per_day=values["doba"],
+        own_posts_per_day=values["wlasne_doba"],
+    )
+
+
+async def named_scope_accounts(
+    pool: asyncpg.Pool, *, organization_id: UUID, ids: Iterable[UUID]
+) -> tuple[ConsentAccount, ...]:
+    """The accounts of a signed scope, by name, as far as the database still knows them."""
+    wanted = list(ids)
+    if not wanted:
+        return ()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, platform, external_account_id, state FROM social_accounts "
+            "WHERE organization_id = $1 AND id = ANY($2::uuid[]) "
+            "ORDER BY platform, external_account_id",
+            organization_id,
+            wanted,
+        )
+    return tuple(
+        ConsentAccount(
+            account_id=row["id"],
+            platform=str(row["platform"]),
+            handle=str(row["external_account_id"]),
+            state=str(row["state"]),
+        )
+        for row in rows
+    )
+
+
+async def scope_summary(
+    pool: asyncpg.Pool, *, organization_id: UUID, workspace_id: UUID, project_id: UUID
+) -> dict[str, Any]:
+    """The scope as the card shows it and its panel starts from (`zakres` of `room.show`).
+
+    Read from the database on every call; nothing here is a decision. `do_wyboru` is the accounts
+    the panel may offer (assigned, not stopped) with what the platform matrix lets each do; the
+    card sends back ids from it, and `plan_limits` checks every one again.
+    """
+    delegation = await PresenceStore(pool).delegation_for(
+        organization_id=organization_id, project_id=project_id
+    )
+    assigned = await assigned_accounts(
+        pool, organization_id=organization_id, workspace_id=workspace_id, project_id=project_id
+    )
+    state = scope_state(delegation)
+    in_scope = set(delegation.scope.accounts) if delegation is not None else set()
+    if delegation is not None and state != "BRAK":
+        named = await named_scope_accounts(
+            pool, organization_id=organization_id, ids=delegation.scope.accounts
+        )
+        limits = effective_limits(delegation)
+    else:
+        named = ()
+        limits = effective_limits(Budget())
+    choices = []
+    for account in assigned:
+        if account.state in STOPPED_STATES:
+            continue
+        support = support_for(account.platform)
+        entry = {
+            "id": str(account.account_id),
+            "platforma": account.platform,
+            "konto": account.handle,
+            "dzialania": [a for a in _PUBLISHING_ACTIONS if action_supported(a, support)],
+            "w_zakresie": state != "BRAK" and account.account_id in in_scope,
+        }
+        if entry["w_zakresie"]:
+            # v11: WHAT BINDS THIS ACCOUNT (its own number, its platform's or the project's), so
+            # the panel opens on the real numbers and can set each account's own.
+            entry["limity"] = limits_for(limits, account.account_id, account.platform).to_json()
+        choices.append(entry)
+    return {
+        "stan": state,
+        "tryb": delegation.mode if delegation is not None and state != "BRAK" else None,
+        "wygasa": (
+            delegation.expires_at.isoformat()
+            if delegation is not None and state != "BRAK" and delegation.expires_at
+            else None
+        ),
+        "konta": _names(named),
+        "dzialania": list(delegation.scope.actions)
+        if delegation is not None and state != "BRAK"
+        else [],
+        "limity": {
+            "godzina": limits.publications_per_hour,
+            "doba": limits.publications_per_day,
+            "wlasne_doba": limits.own_posts_per_day,
+        },
+        # v11: true when the signed limits are per platform / per account (then `limity` above is
+        # the project's own number, a fallback, and each account of `do_wyboru` has its own);
+        # `razem` is the overall ceiling over all accounts, only when one was signed.
+        "wedlug_kont": limits.per_account,
+        "razem": {
+            "godzina": limits.overall_per_hour() if limits.per_account else None,
+            "doba": limits.overall_per_day() if limits.per_account else None,
+        },
+        "do_wyboru": choices,
+        "domyslne": dict(CARD_LIMIT_DEFAULTS),
+        "granice": dict(CARD_LIMIT_BOUNDS),
+    }
+
+
+async def pause_for_card(
+    pool: asyncpg.Pool,
+    plan: ConsentPlan,
+    *,
+    organization_id: UUID,
+    workspace_id: UUID,
+    project_id: UUID,
+    host: str,
+) -> DelegationRow:
+    """Pause the signature `plan` was drawn against. The caller has ALREADY redeemed the token."""
+    if plan.kind != CONSENT_PAUSE or plan.delegation_id is None:
+        raise ValueError("to nie jest plan wstrzymania")
+    delegation = await PresenceStore(pool).set_paused(
+        plan.delegation_id, organization_id=organization_id, paused=True, at=datetime.now(UTC)
+    )
+    await _audit_pause(
+        pool,
+        delegation,
+        kind="PROJECT_DELEGATION_PAUSED",
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        project_id=project_id,
+        host=host,
+    )
+    # A pause that left a turn running would be a button that does not stop anything.
+    await interrupt_presence_sessions(pool, organization_id=organization_id, project_id=project_id)
+    return delegation
+
+
+async def resume_for_card(
+    pool: asyncpg.Pool,
+    plan: ConsentPlan,
+    *,
+    organization_id: UUID,
+    workspace_id: UUID,
+    project_id: UUID,
+    host: str,
+) -> DelegationRow:
+    """Lift the pause of the signature `plan` was drawn against. Token already redeemed."""
+    if plan.kind != CONSENT_RESUME or plan.delegation_id is None:
+        raise ValueError("to nie jest plan wznowienia")
+    delegation = await PresenceStore(pool).set_paused(
+        plan.delegation_id, organization_id=organization_id, paused=False, at=datetime.now(UTC)
+    )
+    await _audit_pause(
+        pool,
+        delegation,
+        kind="PROJECT_DELEGATION_RESUMED",
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        project_id=project_id,
+        host=host,
+    )
+    return delegation
+
+
+async def _audit_pause(
+    pool: asyncpg.Pool,
+    delegation: DelegationRow,
+    *,
+    kind: str,
+    organization_id: UUID,
+    workspace_id: UUID,
+    project_id: UUID,
+    host: str,
+) -> None:
+    async with pool.acquire() as connection, connection.transaction():
+        await AuditWriter(connection).record(
+            kind=kind,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            subject_ref=f"delegation:{delegation.id}",
+            actor_ref=f"plugin:{host}",
+            payload={
+                "delegation_id": str(delegation.id),
+                "project_id": str(project_id),
+                "mode": delegation.mode,
+                "payload_hash": delegation.scope_sha256,
+            },
+        )
 
 
 async def requests_waiting_on(

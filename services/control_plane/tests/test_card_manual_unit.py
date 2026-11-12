@@ -659,7 +659,8 @@ def test_without_manual_sending_the_card_is_the_send_card_of_v7(tmp_path, extra)
         data=data,
     )
     assert got["send"] == 1 and got["man"] == 0
-    assert got["foot"].startswith("Nothing posts without your click.")
+    # v11: the footer is quiet, so the promise is no longer there: it is said where a person is asked to click (the confirmation).
+    assert got["foot"] is None
     assert "Goes out from" in got["hint"]
 
 
@@ -673,12 +674,17 @@ def _script() -> str:
     return html[html.index("<script>") : html.index("</script>")]
 
 
-def test_the_send_machine_is_byte_for_byte_the_one_of_v7() -> None:
+def test_the_send_machine_is_byte_for_byte_the_one_of_v7_but_for_the_refusal_code() -> None:
+    """v9 added ONE thing to the machine: a refusal remembers its `kod`, so the box can offer the fix
+    ("Raise limits", "Resume Wenext") by code. Without that field the block is the v7 block, byte for
+    byte, which is what the hash below says: nothing that sends was touched."""
     script = _script()
     block = script[
         script.index("/*SEND-BEGIN*/") : script.index("/*SEND-END*/") + len("/*SEND-END*/")
     ]
-    assert hashlib.sha256(block.encode()).hexdigest() == (
+    added = ", code: data && data.kod }"
+    assert block.count(added) == 1
+    assert hashlib.sha256(block.replace(added, " }").encode()).hexdigest() == (
         "2c40f73f69401196dca1db635ca3a3935bec0c64f95f9ee4b8a18b6f3b27648f"
     )
 

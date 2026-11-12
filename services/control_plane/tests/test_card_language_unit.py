@@ -29,8 +29,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from control_plane.presence import card_consent, human_approval
-from control_plane.tools import apps_ui, card_send
+from control_plane.presence import batch_plan, card_consent, human_approval, human_revision
+from control_plane.tools import apps_ui, card_actions, card_batch, card_connect, card_send
 
 CONTROL_PLANE = Path(__file__).resolve().parents[1]
 LONG_DASHES = re.compile("[" + chr(0x2014) + chr(0x2013) + "]")
@@ -126,7 +126,7 @@ def test_the_english_has_the_lines_the_launch_needs() -> None:
         "Queued.",
         "Edit",
     )
-    assert (EN["ap.original"], EN["oc.openRoom"]) == ("Original ↗", "Open Room ↗")
+    assert (EN["ap.original"], EN["ft.full"]) == ("Original ↗", "Open full view ↗")
     assert EN["rd.foot"] == "Nothing posts without your click."
     assert EN["fig.none"] == "not measured"
 
@@ -136,7 +136,7 @@ def test_the_english_has_the_lines_the_launch_needs() -> None:
 # ---------------------------------------------------------------------------
 
 #: Keys the script builds from data (`"state." + o.stan`, `"ref." + data.kod`, `"w." + status`).
-DYNAMIC = ("state.", "ref.", "w.", "seen.")
+DYNAMIC = ("state.", "ref.", "w.", "seen.", "sc.act.", "rs.", "ba.st.")
 
 
 def test_every_key_the_script_asks_for_exists_and_every_key_is_asked_for() -> None:
@@ -148,7 +148,7 @@ def test_every_key_the_script_asks_for_exists_and_every_key_is_asked_for() -> No
     unused = {key for key in PL if key not in asked and not key.startswith(DYNAMIC)}
     assert unused == set(), f"teksty, o które karta nigdy nie prosi: {sorted(unused)}"
     # The dynamic families are really built that way, not left over.
-    for prefix in ("state.", "ref.", "w."):
+    for prefix in ("state.", "ref.", "w.", "rs.", "ba.st."):
         assert f'"{prefix}" +' in script, prefix
 
 
@@ -172,12 +172,21 @@ def _codes(*modules: object) -> set[str]:
         value
         for module in modules
         for name, value in vars(module).items()
-        if name.startswith(("CODE_", "REFUSED_")) and isinstance(value, str)
+        if name.startswith(("CODE_", "REFUSED_", "LEFT_")) and isinstance(value, str)
     }
 
 
 def test_every_refusal_code_the_server_sends_has_a_sentence_in_both_languages() -> None:
-    codes = _codes(card_send, card_consent, human_approval)
+    codes = _codes(
+        card_send,
+        card_actions,
+        card_connect,
+        card_batch,
+        batch_plan,
+        card_consent,
+        human_approval,
+        human_revision,
+    )
     assert len(codes) >= 14, "kody znikły z modułów: test nic by nie sprawdzał"
     for lang in (PL, EN):
         assert {key.removeprefix("ref.") for key in lang if key.startswith("ref.")} == codes
@@ -185,7 +194,16 @@ def test_every_refusal_code_the_server_sends_has_a_sentence_in_both_languages() 
 
 def test_a_refusal_sentence_is_in_english_for_english_and_the_server_one_is_the_fallback() -> None:
     # The English sentences are English: none of the Polish letters, and the Polish ones have them.
-    for code in _codes(card_send, card_consent, human_approval):
+    for code in _codes(
+        card_send,
+        card_actions,
+        card_connect,
+        card_batch,
+        batch_plan,
+        card_consent,
+        human_approval,
+        human_revision,
+    ):
         assert not re.search("[ąćęłńóśźż]", EN[f"ref.{code}"]), code
     assert re.search("[ąćęłńóśźż]", PL["ref.OKNO"])
     # The fallback is in the card's code, not only in a comment: own sentence first for English,
@@ -272,7 +290,7 @@ def test_the_chooser_is_a_pure_function_and_the_order_is_in_the_card() -> None:
         and "navigator.language" in script
     )
     assert "host-context-changed" in script
-    assert 'version: "8"' in script
+    assert 'version: "11"' in script
 
 
 @pytest.mark.parametrize(
@@ -326,6 +344,7 @@ def test_what_a_host_may_show_about_the_card_follows_the_pinned_language() -> No
     assert apps_ui.read("ui://wenext/okazje-v5.html") is None
     assert apps_ui.read("ui://wenext/okazje-v6.html") is None
     assert apps_ui.read("ui://wenext/okazje-v7.html") is None
+    assert apps_ui.read("ui://wenext/okazje-v8.html") is None
     for text in apps_ui._RESOURCE_TEXT.values():
         assert not any(LONG_DASHES.search(value) for value in text.values())
 

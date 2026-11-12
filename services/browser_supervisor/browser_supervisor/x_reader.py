@@ -150,7 +150,11 @@ RENDER_WAIT_S = 10.0
 POLL_S = 0.25
 #: The post count must hold still this long before the page counts as rendered.
 SETTLE_S = 0.75
-VIEWER_WAIT_MS = 2_000
+#: How long the reader waits for the account link of the navigation. It was 2 s while the actuator
+#: waited 10 s (`x_writer.STEP_TIMEOUT_S`) for THE SAME link, so a slow page the actuator could
+#: publish from came back from the reader as "no account read", and the control plane turned that
+#: into "no session" (13.10.2026). Same link, same patience: a test keeps the two equal.
+VIEWER_WAIT_MS = 10_000
 READ_TIMEOUT_MS = 1_500
 
 # -- selectors: the ONE place live tuning touches --------------------------------------------------

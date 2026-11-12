@@ -96,6 +96,111 @@ claude --plugin-dir /path/to/wenext/plugins/wenext
 
 Skills are namespaced in Claude Code, for example `/wenext:first-users` and `/wenext:start-project`.
 
+## Wenext in Claude Code
+
+Type `/wenext`. A pane opens next to the chat, and in about three seconds you see this:
+
+```text
+◢◣ Wenext                                      As of 08:22
+4 people are writing right now about the problem your code solves.
+Newest 42 min ago · 4 replies waiting for your OK
+
+p: ‹ Prev  1 of 4  n: Next ›
+╭──────────────────────────────────────────────────────────────╮
+│ ● r/SaaS · 42 min ago · u/quiet_ledger           Reply ready │
+│ How do you calculate MRR from a Stripe export when you have  │
+│ annual plans?                                                │
+│                                                              │
+│ YOUR REPLY, AS IT WILL APPEAR                                │
+│ ▎ u/maya_builds_things · now                                 │
+│ ▎ Normalize every subscription to a monthly amount first,    │
+│ ▎ then sum. Yearly plan: price divided by 12...              │
+│                                                              │
+│ [ Send ]  e: Edit  c: Copy  k: Skip  o: Original ↗           │
+╰──────────────────────────────────────────────────────────────╯
+● u/maya_builds_things   ● @maya_builds
+Nothing posts without your click · getwenext.com
+```
+
+Real people, one at a time, with your reply exactly as it will appear. The first time you open it
+in a session it shows what the agent read ("Read 9 threads on r/SaaS, X, r/indiehackers") before
+the card. It is a **mod**: TypeScript that Claude Code runs itself, so there is nothing to build and
+nothing to run in the background.
+
+### Install (two minutes)
+
+1. Have the local stack running (see Prerequisites above: `make up-observe`).
+2. Add the plugin:
+
+   ```bash
+   claude plugin marketplace add /path/to/wenext
+   claude plugin install wenext@wenext
+   ```
+
+   Or try it for one session and install nothing:
+
+   ```bash
+   claude --plugin-dir /path/to/wenext/plugins/wenext
+   ```
+
+3. In the folder of what you built, ask "find my first users", then type `/wenext` whenever you
+   want the people back on screen. The pane also opens by itself the moment the agent shows the
+   room (a one line band, with an Open button, when the terminal is too narrow for it).
+
+Mods need a Claude Code that supports them (measured on 2.1.296, in a terminal). The pane is made
+of the elements every Claude Code surface draws, so it is meant to appear on the Desktop app's
+Code tab as well; that one has not been checked on a real Desktop yet. `claude plugin validate
+plugins/wenext` lists everything the mod does, `claude plugin test plugins/wenext` runs its tests.
+
+### The keys
+
+| Key | What it does |
+| --- | --- |
+| `n` / `p` | next and previous person |
+| `s` Send | opens the draft in Wenext. The click that sends is there, never in the pane |
+| `e` Edit | one line field (↵ marks a line break). Enter asks the agent, in your words, to save a new draft. Nothing is published |
+| `k` Skip | asks the agent to save the conversation as skipped |
+| `c` Copy | puts the reply on the clipboard |
+| `r` Reconnect | shown on the account whose session was lost; opens the page where the agent's browser signs in |
+| `l` Limits | opens the page with the limits and Pause |
+
+There is no "Send all" here. In Codex the card sends a whole reviewed batch with one click (the list, the
+schedule inside your limits, "Yes, send these N"); that is two app-only tools a mod cannot call, and the
+Wenext page has no batch flow to link to yet, so a button with that name would not do what it says. Here you
+send per draft, or open the same project in Codex for the batch.
+
+### Try it without any account
+
+The demo sandbox is a fictional product ("tallymark"), fictional people and no way to reach a
+platform. In it the pane rehearses the whole send, and says so every step: Send, the consent
+sentence ("Send from u/maya_builds_things? It goes out exactly as you see it."), "Sent to the
+publisher (demo)", then "Posted (demo)". No program runs, nothing is copied, no message goes to the
+agent.
+
+```bash
+make demo-seed                      # the sandbox: 4 conversations, 4 drafted replies
+make demo-claude DEMO_REPO=~/dev/tallymark
+cd ~/dev/tallymark && claude --plugin-dir /path/to/wenext/plugins/wenext
+# type /wenext, then s, then y
+```
+
+`make demo-claude` writes that folder's `.claude/settings.local.json` (the sandbox project, an
+English card, the tools that read Reddit, X and the web switched off, no permission prompt for the
+four tools the demo uses) and a `CLAUDE.md`. It touches nothing else of your Claude Code setup.
+Choose Trust when Claude Code asks about the folder.
+
+### What it never does
+
+- It publishes nothing and cannot: it calls no MCP tool and registers none. Claude Code lets a mod
+  reach only the tools the model can reach (measured: `no connected MCP tool` for the card's
+  app-only tools), and a send the agent could make on its own would not be your click. So Send
+  opens Wenext, where your click is.
+- The only program it runs is the system's opener (`open`, `xdg-open`) with an http(s) address.
+- Edit and Skip are written in your name to the agent, name a draft tool and a skip tool, and
+  forbid publishing.
+- The "demo" flag comes from the server, for the sandbox organization only, and never for hosted
+  Wenext.
+
 ## First run
 
 1. Run the launcher once: `plugins/wenext/bin/wenext setup`. It records where your Wenext

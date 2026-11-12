@@ -28,6 +28,7 @@ from community_os_contracts.enums import E1_ALLOWED_INTERACTIVE_REASONS
 from . import devtools_port, profile, vncpasswd
 from .args import DISPLAY_ONLY_GEOMETRY, HUMAN_GEOMETRY, build_args, build_human_args
 from .devtools_port import DevToolsEndpoint
+from .drain import StderrTail, stderr_after_exit
 
 
 class ForbiddenInteractiveReason(Exception):
@@ -62,6 +63,10 @@ class RunningCapsule:
     reason: InteractiveReason | None = None
     #: D-026: INTERACTIVE started for rendering only — no human, no gateway credentials.
     display_only: bool = False
+    #: The drain of Chrome's stderr (`drain.py`): the pipe is read for as long as the browser
+    #: lives, because a browser that cannot write its log blocks, and a blocked browser is a
+    #: capsule that answers nothing (12 and 13.10.2026). `None` for a process without a pipe.
+    stderr_tail: StderrTail | None = None
 
     def is_alive(self) -> bool:
         return self.process.poll() is None
@@ -201,10 +206,17 @@ class BrowserSupervisor:
             stderr=subprocess.PIPE,
             start_new_session=True,
         )
+        # READ THE PIPE FROM THE FIRST MOMENT, not only when a start fails: see `drain.py`.
+        chrome_tail = StderrTail.attach(proces, name=f"chrome-{self.capsule_id}")
 
         if for_person:
             self._capsule = self._started_for_person(
-                proces, display_proc, wm_proc, reason=reason, timeout_s=min(timeout_s, 10.0)
+                proces,
+                display_proc,
+                wm_proc,
+                reason=reason,
+                timeout_s=min(timeout_s, 10.0),
+                stderr_tail=chrome_tail,
             )
             return self._capsule
 
@@ -216,10 +228,9 @@ class BrowserSupervisor:
                 timeout_s=timeout_s,
             )
         except Exception as exc:
-            stderr = b""
             with contextlib.suppress(Exception):
                 proces.kill()
-                _, stderr = proces.communicate(timeout=5)
+            stderr = stderr_after_exit(proces, chrome_tail)
             for helper_process in (wm_proc, display_proc):
                 self._kill(helper_process)
             raise CapsuleStartFailed(
@@ -242,6 +253,7 @@ class BrowserSupervisor:
             wm_process=wm_proc,
             reason=reason,
             display_only=display_only,
+            stderr_tail=chrome_tail,
         )
         return self._capsule
 
@@ -253,6 +265,7 @@ class BrowserSupervisor:
         *,
         reason: InteractiveReason | None,
         timeout_s: float,
+        stderr_tail: StderrTail | None = None,
     ) -> RunningCapsule:
         """A launch for a person has no endpoint to wait for, so "started" means: the process is
         still alive after a short settle. A browser that exits at once (a locked profile, a bad
@@ -263,9 +276,7 @@ class BrowserSupervisor:
                 break
             time.sleep(0.1)
         if proces.poll() is not None:
-            stderr = b""
-            with contextlib.suppress(Exception):
-                _, stderr = proces.communicate(timeout=5)
+            stderr = stderr_after_exit(proces, stderr_tail)
             for helper_process in (wm_proc, display_proc):
                 self._kill(helper_process)
             raise CapsuleStartFailed(
@@ -284,6 +295,7 @@ class BrowserSupervisor:
             wm_process=wm_proc,
             reason=reason,
             display_only=False,
+            stderr_tail=stderr_tail,
         )
 
     # -- attaching ------------------------------------------------------------
@@ -464,9 +476,14 @@ class BrowserSupervisor:
                 self.vnc_socket.unlink()
             command += ["-rfbunixpath", str(self.vnc_socket)]
 
-        return subprocess.Popen(
+        display = subprocess.Popen(
             command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, start_new_session=True
         )
+        # Xtigervnc logs every client connection; the same undrained pipe would stop it in the end
+        # (1.8 KiB in nine hours on the stuck capsule: slower than Chromium, the same road). The
+        # drain's thread ends with the process; nobody needs its text afterwards.
+        StderrTail.attach(display, name=f"xtigervnc-{self.capsule_id}")
+        return display
 
     def _start_window_manager(self, srodowisko: dict[str, str]) -> subprocess.Popen:
         # Chrome without a window manager will not handle popups and modal windows correctly,
@@ -544,6 +561,26 @@ class BrowserSupervisor:
             if capsule.process.poll() is not None:
                 return
             time.sleep(0.1)
+
+    @staticmethod
+    def kill_hard(proces: subprocess.Popen | None) -> None:
+        """SIGKILL a browser that does not answer, and everything in its process group.
+
+        `_kill` asks politely first (SIGTERM, five seconds) and that is right for a browser that
+        works. A hung one, blocked in a write to a full pipe or in a lock, never handles SIGTERM:
+        the signal is delivered to a main thread that is not there to act on it. The browser was
+        started with `start_new_session=True`, so its group is its own and the helper processes
+        (renderers, GPU, crashpad) go with it. What this costs: the cookies Chromium had not yet
+        flushed (it flushes every few seconds), which for a browser already hung is nothing.
+        """
+        if proces is None or proces.poll() is not None:
+            return
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(os.getpgid(proces.pid), signal.SIGKILL)
+        with contextlib.suppress(Exception):
+            proces.kill()
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proces.wait(timeout=5)
 
     @staticmethod
     def _kill(proces: subprocess.Popen | None) -> None:

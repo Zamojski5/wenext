@@ -519,7 +519,7 @@ class KnowledgeStore:
             text=window.decode("utf-8", errors="replace"),
         )
 
-    async def write(self, item: NewItem, scope: Scope) -> ItemRow:
+    async def write(self, item: NewItem, scope: Scope, *, measured: bool = False) -> ItemRow:
         """Record one finding. The kind's rule is the database's, and a violation is a sentence.
 
         `CheckViolationError` is translated rather than propagated because the caller is often a
@@ -535,6 +535,15 @@ class KnowledgeStore:
         wiersza zamienia kolizję w idempotencję, nie w błąd. Powtórny zapis nie jest awarią:
         to jest ta sama myśl, zapisana drugi raz.
         """
+        if item.kind == "LESSON" and not measured:
+            # A lesson is COMPUTED from measured publications (`control_plane/learning`) or is a
+            # seeded rule written by the seeding script. An agent that wrote one itself would be
+            # inventing a number with a confident voice, so the model's and the person's paths
+            # (`memory.write`, the knowledge API) never pass `measured=True` and are refused here.
+            raise KnowledgeRefused(
+                "wniosek (LESSON) liczy produkt z pomiarów publikacji, a nie zapisuje go agent "
+                "ani człowiek. Zapisz własny wniosek jako INTERPRETATION"
+            )
         try:
             async with self._pool.acquire() as conn:
                 row = await conn.fetchrow(
@@ -659,7 +668,9 @@ class KnowledgeStore:
 
     # -- correction and retraction, which never delete ----------------------------
 
-    async def correct(self, item_id: UUID, replacement: NewItem, scope: Scope) -> ItemRow:
+    async def correct(
+        self, item_id: UUID, replacement: NewItem, scope: Scope, *, measured: bool = False
+    ) -> ItemRow:
         """Write the new finding and point the old one at it. NOTHING IS OVERWRITTEN.
 
         P3: "użytkownik poprawia lub wycofuje ustalenie" and the correction has to be visible
@@ -667,7 +678,7 @@ class KnowledgeStore:
         Editing the statement in place would make the correction unobservable — the new text
         would simply have always been there.
         """
-        written = await self.write(replacement, scope)
+        written = await self.write(replacement, scope, measured=measured)
         async with self._pool.acquire() as conn:
             updated = await conn.fetchval(
                 "UPDATE knowledge_items SET superseded_by = $3"
@@ -894,6 +905,11 @@ def _refusal(exc: asyncpg.CheckViolationError, item: NewItem) -> str:
         return (
             "doświadczenie wiąże trzy rzeczy: payload musi mieć 'situation', 'decision' "
             "i 'outcome'. Bez wyniku to plan, bez sytuacji anegdota"
+        )
+    if "lesson_keeps_its_evidence" in name:
+        return (
+            "wniosek niesie dowód: klucz porównania oraz po obu stronach liczebność `n` "
+            "(albo, dla zasianej reguły, `rule` i `source`), a pisze go produkt, nie człowiek"
         )
     if "kind_is_known" in name or "stated_by_is_known" in name:
         return f"nieznany rodzaj albo autor wpisu: kind={item.kind!r}, stated_by={item.stated_by!r}"

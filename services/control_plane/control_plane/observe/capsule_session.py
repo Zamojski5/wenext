@@ -164,17 +164,50 @@ def capsule_env(env: Any | None = None) -> dict[str, str]:
     return {key: value for key in CAPSULE_ENV_KEYS if (value := (source.get(key) or "").strip())}
 
 
-async def read_session(probe: SessionProbe | None) -> SessionReading:
-    """Never raises: the card must render whatever the platform did."""
+#: How many more looks a Reddit session read gets after a TRANSPORT failure (the capsule did not
+#: answer in time, did not accept the connection), and the breath between them. The same rule the X
+#: source applies (`XBrowserSource.session_state`, `community_os_contracts.session_verdict`): a look
+#: that failed is unknown, and one more try is cheap. Only the transport kind is repeated: a 403
+#: without a reason or a 429 is Reddit asking us to stop, and a retry would be the opposite.
+SESSION_READ_RETRIES = 1
+SESSION_READ_PAUSE_S = 1.0
+
+
+def _transport_failure(exc: BaseException) -> bool:
+    """Was this `SourceUnavailable` the capsule not answering, as opposed to a platform answer?"""
+    import httpx
+
+    return isinstance(exc.__cause__, httpx.TransportError)
+
+
+async def read_session(
+    probe: SessionProbe | None,
+    *,
+    retries: int = SESSION_READ_RETRIES,
+    pause_s: float = SESSION_READ_PAUSE_S,
+) -> SessionReading:
+    """Never raises: the card must render whatever the platform did.
+
+    THREE ANSWERS, as for X: logged in, logged out (the platform said so: `CredentialsMissing`), or
+    unknown (`logged_in=None`: the capsule did not answer, Reddit refused or the body was not JSON).
+    A transport failure is looked at once more before it is reported.
+    """
+    import asyncio
+
     if probe is None:
         return SessionReading(None, None, NOT_CONFIGURED_HERE)
-    try:
-        state = await probe.session_state()
-    except CredentialsMissing as exc:
-        return SessionReading(False, None, str(exc)[:300])
-    except SourceUnavailable as exc:
-        return SessionReading(None, None, str(exc)[:300])
-    return SessionReading(bool(state.logged_in), state.username, None)
+    for attempt in range(1 + max(0, retries)):
+        try:
+            state = await probe.session_state()
+        except CredentialsMissing as exc:
+            return SessionReading(False, None, str(exc)[:300])
+        except SourceUnavailable as exc:
+            if attempt < retries and _transport_failure(exc):
+                await asyncio.sleep(pause_s)
+                continue
+            return SessionReading(None, None, str(exc)[:300])
+        return SessionReading(bool(state.logged_in), state.username, None)
+    return SessionReading(None, None, "nie udało się odczytać sesji")  # pragma: no cover
 
 
 def card_status(state: CapsuleState | None, session: SessionReading | None) -> str:

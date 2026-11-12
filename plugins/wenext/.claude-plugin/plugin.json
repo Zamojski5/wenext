@@ -11,5 +11,6 @@
     "x",
     "community",
     "founders"
-  ]
+  ],
+  "types": "./types/index.d.ts"
 }

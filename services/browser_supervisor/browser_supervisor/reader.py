@@ -587,6 +587,22 @@ class _ReaderHTTPServer(http.server.HTTPServer):
         self.platform_cooldown_s = platform_cooldown_s
         self._reddit_paced_until: float | None = None
         self._last_fetch_at: float | None = None
+        #: When the request being served now began (`clock()`), `None` between requests. The
+        #: watchdog (`watchdog.py`) reads it from another thread: a request that has been here for
+        #: minutes is stuck in a call that does not return, and everybody queued behind it waits.
+        self._busy_since: float | None = None
+
+    def finish_request(self, request: Any, client_address: Any) -> None:
+        self._busy_since = self.clock()
+        try:
+            super().finish_request(request, client_address)
+        finally:
+            self._busy_since = None
+
+    def busy_for(self) -> float | None:
+        """Seconds the current request has been running, or `None` when the server is idle."""
+        since = self._busy_since
+        return None if since is None else max(0.0, self.clock() - since)
 
     def reddit_pace_left(self) -> float | None:
         """Seconds left of the brake after Reddit's 429, or None when a read may go out."""
@@ -1442,6 +1458,10 @@ class ReaderServer:
             target=self._server.serve_forever, name="wenext-reader", daemon=True
         )
         self._thread.start()
+
+    def busy_for(self) -> float | None:
+        """How long the request in progress has been running, `None` when idle (the watchdog)."""
+        return self._server.busy_for()
 
     def stop(self) -> None:
         self._server.shutdown()

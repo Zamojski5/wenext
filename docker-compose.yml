@@ -248,7 +248,13 @@ services:
       # Gateway przy dołączaniu — razem z odrzuceniem niezgodnego builda (L5159).
       test: ["CMD", "python3", "-m", "browser_supervisor.healthcheck"]
       interval: 3s
-      timeout: 5s
+      # 10 s, nie 5 s (13.10.2026). Sama kontrola mieści się teraz w 4 s (2 s na CDP i 1,5 s na
+      # pytanie o ekran człowieka), ale na zawieszonej przeglądarce chodzi do końca obu limitów, a
+      # Docker zabijał ją przy 5 s i zapisywał tylko "exceeded timeout", bez zdania o przyczynie.
+      # Z zapasem kontrola kończy się własnym komunikatem. SAMO ZDROWIE nie leczy kapsuły:
+      # leczy ją strażnik w procesie (`browser_supervisor/watchdog.py`), który przy zawieszonej
+      # przeglądarce kończy proces, a `restart: unless-stopped` podnosi go od nowa.
+      timeout: 10s
       retries: 25
       start_period: 25s
 

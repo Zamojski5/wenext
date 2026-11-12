@@ -55,7 +55,18 @@ BUDGET_KEYS = (
     "own_posts_per_day",
     # Ile powrotów naraz może sobie zaplanować (P4 etap C).
     "scheduled_returns",
+    # v11 (13.10): LIMITY PER KONTO I PER PLATFORMA. Jeden wspólny kosz projektu znaczył, że
+    # odpowiedzi na X (6 na godzinę) czekały za Reddit (jedna na godzinę), a limit Reddita
+    # przegrywał z tempem X. To obiekty zagnieżdżone, nie liczby: patrz `ACCOUNT_LIMIT_KEYS`.
+    # Nieobecne w podpisie sprzed v11, więc jego digest się nie zmienia (`Budget.to_json`).
+    "platform_limits",
+    "account_limits",
 )
+
+#: What ONE account (or all the accounts of one platform) may do, per rolling window. Replies and
+#: own posts are counted SEPARATELY: a post that takes a whole community's attention is not a
+#: reply, and a day of replies must not eat the one own post (nor the other way round).
+ACCOUNT_LIMIT_KEYS = ("replies_per_hour", "replies_per_day", "own_posts_per_day")
 
 
 #: Deadline of a signature that named none, and the bounds of one that did. A week is the length
@@ -101,17 +112,52 @@ class Scope:
 
 
 @dataclass(frozen=True)
+class AccountCaps:
+    """The limits signed for ONE account or for ONE platform. A field left `None` was not signed
+    at this level and the next level answers (account, then platform, then the project's own)."""
+
+    replies_per_hour: int | None = None
+    replies_per_day: int | None = None
+    own_posts_per_day: int | None = None
+
+    def to_json(self) -> dict[str, int]:
+        return {
+            key: value for key in ACCOUNT_LIMIT_KEYS if (value := getattr(self, key)) is not None
+        }
+
+    @property
+    def empty(self) -> bool:
+        return all(getattr(self, key) is None for key in ACCOUNT_LIMIT_KEYS)
+
+
+@dataclass(frozen=True)
 class Budget:
-    """How much a delegation permits per window. Absent key means NO limit of that kind."""
+    """How much a delegation permits per window. Absent key means NO limit of that kind.
+
+    SINCE v11 (13.10) THE LIMITS CAN BE PER PLATFORM AND PER ACCOUNT. `platform_limits` (`"X"`,
+    `"REDDIT"`) and `account_limits` (an account id) each map to `AccountCaps`. The old totals
+    (`publications_per_hour`, `publications_per_day`, `own_posts_per_day`) keep their meaning
+    when no per-account limit is signed (ONE bucket for the whole project, exactly as before) and
+    become an optional OVERALL CEILING over every account when one is. Both new fields are stored
+    as sorted tuples (hashable, canonical) and are OMITTED from `to_json` when empty, so the
+    digest of every signature made before v11 is the digest it was signed with.
+    """
 
     model_turns_per_day: int | None = None
     publications_per_day: int | None = None
     publications_per_hour: int | None = None
     own_posts_per_day: int | None = None
     scheduled_returns: int | None = None
+    platform_limits: tuple[tuple[str, AccountCaps], ...] = ()
+    account_limits: tuple[tuple[UUID, AccountCaps], ...] = ()
+
+    @property
+    def per_account(self) -> bool:
+        """Whether any per-platform or per-account limit was signed (otherwise: one bucket)."""
+        return bool(self.platform_limits or self.account_limits)
 
     def to_json(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             key: value
             for key, value in (
                 ("model_turns_per_day", self.model_turns_per_day),
@@ -122,6 +168,14 @@ class Budget:
             )
             if value is not None
         }
+        # Only when signed: an empty mapping would change the digest of every older signature.
+        if self.platform_limits:
+            out["platform_limits"] = {name: caps.to_json() for name, caps in self.platform_limits}
+        if self.account_limits:
+            out["account_limits"] = {
+                str(account): caps.to_json() for account, caps in self.account_limits
+            }
+        return out
 
 
 def parse_scope(payload: Any) -> Scope:
@@ -182,9 +236,9 @@ def parse_budget(payload: Any) -> Budget:
             f"budżet delegacji: nieznane klucze {unknown}. Limit, którego nikt nie egzekwuje, "
             f"czyta się dokładnie jak brak limitu. Dozwolone: {', '.join(BUDGET_KEYS)}"
         )
-    values: dict[str, int] = {}
+    values: dict[str, Any] = {}
     for key in BUDGET_KEYS:
-        if key not in payload:
+        if key not in payload or key in NESTED_BUDGET_KEYS:
             continue
         raw = payload[key]
         if isinstance(raw, bool) or not isinstance(raw, int):
@@ -192,7 +246,76 @@ def parse_budget(payload: Any) -> Budget:
         if raw < 0:
             raise ScopeError(f"budżet delegacji: `{key}` nie może być ujemne")
         values[key] = raw
+    if payload.get("platform_limits"):
+        values["platform_limits"] = _parse_caps(
+            payload["platform_limits"], "platform_limits", _platform_key
+        )
+    if payload.get("account_limits"):
+        values["account_limits"] = _parse_caps(
+            payload["account_limits"], "account_limits", _account_key
+        )
     return Budget(**values)
+
+
+#: The budget keys whose value is an object, not a number.
+NESTED_BUDGET_KEYS = ("platform_limits", "account_limits")
+
+
+def _platform_key(raw: str) -> str:
+    name = raw.strip().upper()
+    if not name or not name.replace("_", "").isalnum():
+        raise ScopeError(f"budżet delegacji: {raw!r} nie jest nazwą platformy")
+    return name
+
+
+def _account_key(raw: str) -> UUID:
+    try:
+        return UUID(raw)
+    except ValueError as exc:
+        raise ScopeError(f"budżet delegacji: {raw!r} nie jest identyfikatorem konta") from exc
+
+
+def _parse_caps(payload: Any, field: str, key_of: Any) -> tuple[tuple[Any, AccountCaps], ...]:
+    """`{key: {replies_per_hour, replies_per_day, own_posts_per_day}}` as sorted pairs.
+
+    A closed shape like everything else here: an unknown limit name is a refusal (a limit nobody
+    enforces reads exactly like no limit), a value is a non-negative integer, and an entry that
+    names no limit at all is dropped rather than kept as a signature of nothing.
+    """
+    if not isinstance(payload, dict):
+        raise ScopeError(f"budżet delegacji: `{field}` musi być obiektem")
+    found: dict[Any, AccountCaps] = {}
+    for raw_key, raw_caps in payload.items():
+        key = key_of(str(raw_key))
+        if not isinstance(raw_caps, dict):
+            raise ScopeError(f"budżet delegacji: `{field}` {raw_key!r} musi być obiektem")
+        unknown = sorted(set(raw_caps) - set(ACCOUNT_LIMIT_KEYS))
+        if unknown:
+            raise ScopeError(
+                f"budżet delegacji: `{field}` {raw_key!r}: nieznane limity {unknown}. "
+                f"Dozwolone: {', '.join(ACCOUNT_LIMIT_KEYS)}"
+            )
+        numbers: dict[str, int] = {}
+        for name in ACCOUNT_LIMIT_KEYS:
+            if name not in raw_caps:
+                continue
+            raw = raw_caps[name]
+            if isinstance(raw, bool) or not isinstance(raw, int):
+                raise ScopeError(
+                    f"budżet delegacji: `{field}` {raw_key!r}: `{name}` to liczba całkowita"
+                )
+            if raw < 0:
+                raise ScopeError(
+                    f"budżet delegacji: `{field}` {raw_key!r}: `{name}` nie może być ujemne"
+                )
+            numbers[name] = raw
+        caps = AccountCaps(**numbers)
+        if caps.empty:
+            continue
+        if key in found:
+            raise ScopeError(f"budżet delegacji: `{field}` wymienia {raw_key!r} dwa razy")
+        found[key] = caps
+    return tuple(sorted(found.items(), key=lambda pair: str(pair[0])))
 
 
 def digest(*, mode: str, scope: Scope, budget: Budget, expires_at: datetime | None = None) -> str:

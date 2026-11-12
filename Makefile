@@ -220,7 +220,7 @@ bootstrap-operator: env  ## Załóż jedyną organizację, workspace i operatora
 DEMO_REPO   ?= $(HOME)/Dev/demo/tallymark
 DEMO_SCRIPT := $(REPO_ROOT)/scripts/demo/seed_tallymark.py
 
-.PHONY: demo-dry-run demo-seed demo-reset demo-watch demo-posted demo-status demo-codex
+.PHONY: demo-dry-run demo-seed demo-reset demo-watch demo-posted demo-status demo-codex demo-claude
 
 demo-dry-run: env  ## Demo: co zrobi demo-seed (tylko odczyt, nic nie zapisuje)
 	@$(COMPOSE) exec -T api python - seed --dry-run < $(DEMO_SCRIPT)
@@ -242,6 +242,9 @@ demo-status: env  ## Demo: co jest teraz w organizacji demo (okazje, wnioski, li
 
 demo-codex:  ## Demo: skieruj folder tallymark (DEMO_REPO=...) na projekt demo: .codex/config.toml, AGENTS.md
 	@$(PYTHON) $(REPO_ROOT)/scripts/demo/codex_project.py --repo "$(DEMO_REPO)"
+
+demo-claude:  ## Demo: to samo dla Claude Code (DEMO_REPO=...): .claude/settings.local.json, CLAUDE.md; potem: cd DEMO_REPO && claude --plugin-dir plugins/wenext, /wenext
+	@$(PYTHON) $(REPO_ROOT)/scripts/demo/codex_project.py --repo "$(DEMO_REPO)" --host claude-code
 
 test-host:  ## Suity uruchamiane z hosta (wymaga uv >= 0.12.7 i działającego stacku)
 	@echo "UWAGA: capsulenet jest siecią internal — z hosta NIE dosięgniesz kapsuły,"

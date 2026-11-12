@@ -55,6 +55,9 @@ from community_observer import (
     ThreadNotFound,
 )
 from community_observer.reddit_payload import parse_thread_pair
+from community_observer.x_browser import state_verdict
+from community_os_contracts import AccessMode, ObservationPlatform
+from community_os_contracts.session_verdict import SessionVerdict
 
 from control_plane.approval.store import (
     ApprovalStore,
@@ -73,6 +76,7 @@ from control_plane.execution.adapter import (
     WritingSideEffectPort,
 )
 from control_plane.execution.store import ExecutionStore
+from control_plane.observe.reddit_search import parse_thread_reference
 from control_plane.observe.store import ObservationStore
 from control_plane.presence.budget import effective_limits
 
@@ -101,6 +105,7 @@ from .publication import (
     split_media,
     split_own_post,
 )
+from .send_checks import reddit_created_at, stale_detail, x_created_at
 from .store import RUN_STOPPED, PilotStore
 
 _LOG = logging.getLogger(__name__)
@@ -265,6 +270,16 @@ def thread_facts(payload: Any) -> ThreadFacts:
     )
 
 
+def _subreddit_of(payload: Any, *, fallback: str) -> str:
+    """The subreddit Reddit says the post is in (its spelling), or `fallback` when the payload
+    carries none that looks like a name."""
+    reported = str(thread_facts(payload).post.get("subreddit") or "")
+    looks_like_a_name = (
+        reported.isascii() and reported.replace("_", "").isalnum() and 2 <= len(reported) <= 21
+    )
+    return reported if looks_like_a_name else fallback
+
+
 #: "The same text, whatever the spacing" lives in ONE place (P6). The publisher asked the
 #: question first, for matching our own comment on a thread; `tools/registry.py` asks it now too,
 #: to stop two collaborating sessions proposing one reply twice. Two spellings of this rule would
@@ -406,6 +421,11 @@ class Governance:
     #: The pilot run, when there is one. Kept because `_block_everything` writes a host event on
     #: it; a project request has none and writes none.
     run: Any | None = None
+    #: v11: the delegation's limits when they are PER PLATFORM / PER ACCOUNT (`presence/budget.py`),
+    #: else `None` and the one bucket above (`per_hour`, `per_day`) is the pace. `accounts` are
+    #: the accounts of the signed scope, whose attempts the overall ceiling counts together.
+    limits: Any | None = None
+    accounts: tuple[Any, ...] = ()
 
 
 class DelegationGate(Protocol):
@@ -442,6 +462,7 @@ class PublishHandlers:
         x_port_factory: PortFactory | None = None,
         x_own_post_port_factory: PortFactory | None = None,
         x_capsule_state: CapsuleStateReader | None = None,
+        freshness: Any | None = None,
     ) -> None:
         # Both default to None, and None means the worker cannot answer "is this visible to
         # anyone else". Every request then keeps `public_visibility = UNVERIFIED`. That is the
@@ -476,6 +497,8 @@ class PublishHandlers:
         self._x_source = x_source
         self._x_port_factory = x_port_factory
         self._x_own_post_port_factory = x_own_post_port_factory
+        # v11 (`opportunities/freshness.py`): expires the waiting drafts whose post went cold.
+        self._freshness = freshness
         self._organization_id = organization_id
         self._clock = clock
 
@@ -509,6 +532,10 @@ class PublishHandlers:
         now = self._clock()
         if self._autoapprover is not None and await self._autoapprover.active(now) is not None:
             return True
+        # A draft that waits for a click can still go cold: keep ticking while one does, so it is
+        # expired for good (`reconcile_only`) even when nothing is queued.
+        if self._freshness is not None and await self._freshness.waiting():
+            return True
         requests = await self._publication.requests(organization_id=self._organization_id)
         for r in requests:
             if r.status in (REQUEST_QUEUED, REQUEST_PUBLISHING, REQUEST_UNKNOWN):
@@ -541,11 +568,22 @@ class PublishHandlers:
     async def reconcile_only(self, now: datetime) -> None:
         """The reading half of a tick and nothing else: stale PUBLISHING to UNKNOWN, UNKNOWN
         reconciled against the thread, PUBLISHED observed. Never issues an intent."""
+        await self._expire_stale_drafts(now)
         await self._recover_stale_publishing(now)
         await self._reconcile_unknown(now)
         await self._observe_published(now)
         await self._collect_removal_reports(now)
         await self._check_public_visibility(now)
+
+    async def _expire_stale_drafts(self, now: datetime) -> None:
+        """A waiting reply whose post went cold is expired for good (v11). Never fatal."""
+        if self._freshness is None:
+            return
+        try:
+            for one in await self._freshness.expire(now):
+                _LOG.info("pilot.publish: szkic %s wygasł (%s)", one.revision_id, one.code)
+        except Exception:
+            _LOG.exception("pilot.publish: wygaszanie nieświeżych szkiców padło")
 
     async def thread_has_our_comment(self, request: PublicationRequest) -> tuple[bool, int] | None:
         """`(found, comments_seen)` from a live read of the request's thread, or `None` when the
@@ -658,7 +696,39 @@ class PublishHandlers:
             per_hour=limits.publications_per_hour,
             per_day=limits.publications_per_day,
             whose=f"delegacja {delegation.id}",
+            limits=limits if limits.per_account else None,
+            accounts=tuple(delegation.scope.accounts),
         )
+
+    async def _pace_detail(
+        self, request: PublicationRequest, rule: Governance, now: datetime
+    ) -> str | None:
+        """Why the pace holds this request, in a sentence for the queue's detail line, or `None`.
+
+        With limits PER ACCOUNT (v11) the pace is the account's own (its replies, or its own
+        posts) and the overall ceiling when one was signed, counted over real attempts of the
+        scope's accounts: an X reply is not held by Reddit's attempts nor the other way round.
+        Otherwise the one bucket it always was: the organization's real attempts in the hour and
+        the day against the policy's or the delegation's totals.
+        """
+        if rule.limits is not None:
+            detail = await self._publication.account_pace(
+                request=request, limits=rule.limits, accounts=rule.accounts, now=now
+            )
+            return detail + (f" ({rule.whose})" if rule.whose else "") if detail else None
+        hour = await self._publication.attempts_since(
+            organization_id=self._organization_id, since=now - timedelta(hours=1)
+        )
+        day = await self._publication.attempts_since(
+            organization_id=self._organization_id, since=now - timedelta(hours=24)
+        )
+        per_hour, per_day = rule.per_hour, rule.per_day
+        if hour >= per_hour or day >= per_day:
+            return (
+                f"tempo: {hour}/{per_hour} w ostatniej godzinie, "
+                f"{day}/{per_day} w ostatniej dobie" + (f" ({rule.whose})" if rule.whose else "")
+            )
+        return None
 
     async def _publish_request(self, request: PublicationRequest, now: datetime) -> PublishOutcome:
         rule = await self._governance(request, now)
@@ -674,18 +744,8 @@ class PublishHandlers:
             return PublishOutcome(OUTCOME_STOPPED, rule.stopped, request.id)
         run = rule.run
 
-        hour = await self._publication.attempts_since(
-            organization_id=self._organization_id, since=now - timedelta(hours=1)
-        )
-        day = await self._publication.attempts_since(
-            organization_id=self._organization_id, since=now - timedelta(hours=24)
-        )
-        per_hour, per_day = rule.per_hour, rule.per_day
-        if hour >= per_hour or day >= per_day:
-            detail = (
-                f"tempo: {hour}/{per_hour} w ostatniej godzinie, {day}/{per_day} w ostatniej dobie"
-                + (f" ({rule.whose})" if rule.whose else "")
-            )
+        detail = await self._pace_detail(request, rule, now)
+        if detail is not None:
             await self._publication.set_status(request.id, status=REQUEST_QUEUED, detail=detail)
             return PublishOutcome(OUTCOME_PACED, detail, request.id)
 
@@ -761,6 +821,12 @@ class PublishHandlers:
             detail = f"sesja czytnika niedostępna: {exc}"[:300]
             await self._publication.set_status(request.id, status=REQUEST_QUEUED, detail=detail)
             return PublishOutcome(OUTCOME_UNAVAILABLE, detail, request.id)
+        if not session.logged_in and request.not_before is not None:
+            # A SCHEDULED reply (send_checks.py) whose session is not there waits for it and is
+            # tried again: BLOCKED, below, is for a session that belongs to somebody else.
+            detail = f"brak sesji Reddita konta {account}: wniosek czeka na kolejną próbę"
+            await self._publication.set_status(request.id, status=REQUEST_QUEUED, detail=detail)
+            return PublishOutcome(OUTCOME_UNAVAILABLE, detail, request.id)
         if not session.logged_in or (session.username or "").lower() != account.lower():
             detail = (
                 f"sesja w kapsule to {session.username or 'anonim'}, zgoda dotyczy konta "
@@ -812,31 +878,33 @@ class PublishHandlers:
             )
 
         target = await self._publication.target_for(request)
-        community = (
-            await self._store.get_community(
+        payload: Any = None
+        if target is None:
+            # A REPLY WHOSE THREAD NOBODY RECORDED (11.10.2026). The agent read the thread through
+            # `reddit.read` or `reddit.search` and wrote the draft under it; nothing put the thread
+            # into `observed_threads`, so the request used to be SKIPPED as "brak wątku" and five
+            # of six replies the founder approved that day never went out. The thread is recorded
+            # HERE, from the very read the checks below need, and every one of those checks still
+            # runs on it.
+            resolved = await self._resolve_unrecorded_target(request, now)
+            if isinstance(resolved, PublishOutcome):
+                return resolved
+            target, community, payload = resolved
+        else:
+            community = await self._store.get_community(
                 target.community_id, organization_id=self._organization_id
             )
-            if target is not None
-            else None
-        )
-        if target is None or community is None:
+        if community is None:
             await self._publication.set_status(
                 request.id, status=REQUEST_SKIPPED, detail="brak wątku albo community"
             )
             return PublishOutcome(OUTCOME_SKIPPED, "brak wątku", request.id)
-        try:
-            payload = await self._source.read_thread_payload(
-                community.community_key, target.thread_external_id
+        if payload is None:
+            payload = await self._read_thread_for_publication(
+                request, community.community_key, target.thread_external_id
             )
-        except ThreadNotFound:
-            await self._publication.set_status(
-                request.id, status=REQUEST_SKIPPED, detail="wątek zniknął z Reddita"
-            )
-            return PublishOutcome(OUTCOME_SKIPPED, "wątek zniknął", request.id)
-        except (SourceUnavailable, CredentialsMissing) as exc:
-            detail = f"odczyt wątku nie powiódł się: {exc}"[:300]
-            await self._publication.set_status(request.id, status=REQUEST_QUEUED, detail=detail)
-            return PublishOutcome(OUTCOME_UNAVAILABLE, detail, request.id)
+            if isinstance(payload, PublishOutcome):
+                return payload
         facts = thread_facts(payload)
         if facts.locked or facts.archived:
             detail = "wątek zablokowany" if facts.locked else "wątek zarchiwizowany"
@@ -855,6 +923,10 @@ class PublishHandlers:
             detail = "na tym wątku jest już komentarz naszego konta; nowa reakcja = nowa zgoda"
             await self._publication.set_status(request.id, status=REQUEST_SKIPPED, detail=detail)
             return PublishOutcome(OUTCOME_SKIPPED, detail, request.id)
+        stale = stale_detail(request, on_x=False, created_at=reddit_created_at(facts.post), now=now)
+        if stale is not None:  # a scheduled reply into a thread that has gone cold (send_checks.py)
+            await self._publication.set_status(request.id, status=REQUEST_SKIPPED, detail=stale)
+            return PublishOutcome(OUTCOME_SKIPPED, stale, request.id)
         await self._record_snapshot(community, target, payload, now)
 
         return await self._write_it(
@@ -865,6 +937,124 @@ class PublishHandlers:
             run=run,
             port=self._port_factory(account),
             now=now,
+        )
+
+    async def _read_thread_for_publication(
+        self, request: PublicationRequest, community_key: str, external_id: str
+    ) -> Any | PublishOutcome:
+        """The thread's raw payload read through the capsule, or the outcome that ends the tick.
+
+        A thread Reddit no longer knows SKIPS the request (there is nothing to answer); a read
+        that failed leaves it QUEUED with the reason, because the thread may well be there.
+        """
+        assert self._source is not None
+        try:
+            return await self._source.read_thread_payload(community_key, external_id)
+        except ThreadNotFound:
+            await self._publication.set_status(
+                request.id, status=REQUEST_SKIPPED, detail="wątek zniknął z Reddita"
+            )
+            await self._publication.note_target_gone(request)  # v11: other drafts under it expire
+            return PublishOutcome(OUTCOME_SKIPPED, "wątek zniknął", request.id)
+        except (SourceUnavailable, CredentialsMissing) as exc:
+            detail = f"odczyt wątku nie powiódł się: {exc}"[:300]
+            await self._publication.set_status(request.id, status=REQUEST_QUEUED, detail=detail)
+            return PublishOutcome(OUTCOME_UNAVAILABLE, detail, request.id)
+
+    async def _resolve_unrecorded_target(
+        self, request: PublicationRequest, now: datetime
+    ) -> tuple[PublishTarget, Any, Any] | PublishOutcome:
+        """`(target, community, payload)` for a Reddit reply whose thread is not in our tables.
+
+        THE SMALLEST FIX THAT KEEPS EVERY CHECK. The request already stands on a consent for this
+        exact text and this exact address, and the checks that follow (the thread exists, is not
+        locked or archived, the replied-to comment is there, our account has not answered, the
+        pace and the intent gate) were never about whether we had OBSERVED the thread. They need
+        the thread's payload, which is read here by the same reader and handed on, so a request
+        costs the same one read as before. What this adds is the thread's row (and its community's)
+        so `target_for`, the snapshot of the replies and the visibility checks can find it later.
+
+        WHAT IT DOES NOT DO. It does not touch consent, delegation, budget or pace. It does not
+        start observing: a community that is not there is created QUIET and one that is there is
+        left as it is (`ObservationStore.ensure_quiet_community`). It does not trust the address
+        beyond naming the thread: the community comes from what Reddit says the post belongs to,
+        and the post Reddit returns must be the one the consent named.
+
+        Anything it cannot establish SKIPS the request with a sentence that says which part.
+        """
+
+        async def skipped(detail: str) -> PublishOutcome:
+            await self._publication.set_status(request.id, status=REQUEST_SKIPPED, detail=detail)
+            return PublishOutcome(OUTCOME_SKIPPED, "brak wątku", request.id)
+
+        target_id = request.target_external_id  # `t1_` or `t3_`: the database CHECK says so
+        try:
+            name, post_id = parse_thread_reference(request.target_url)
+        except ValueError:
+            return await skipped(
+                "brak wątku: adres celu nie wskazuje wątku Reddita "
+                f"(https://www.reddit.com/r/<społeczność>/comments/<id>/...), więc nie ma "
+                f"czego odczytać: {request.target_url[:120]}"
+            )
+        if target_id.startswith("t3_") and target_id.removeprefix("t3_") != post_id:
+            return await skipped(
+                f"brak wątku: cel {target_id} i adres {request.target_url[:120]} wskazują "
+                "różne posty"
+            )
+        payload = await self._read_thread_for_publication(request, f"r/{name}", post_id)
+        if isinstance(payload, PublishOutcome):
+            return payload
+        try:
+            snapshot = parse_thread_pair(
+                payload,
+                community_key=f"r/{name}",
+                external_id=post_id,
+                observed_at=now,
+                where=f"/r/{name}/comments/{post_id}.json",
+            )
+        except ThreadNotFound:
+            await self._publication.set_status(
+                request.id, status=REQUEST_SKIPPED, detail="wątek zniknął z Reddita"
+            )
+            return PublishOutcome(OUTCOME_SKIPPED, "wątek zniknął", request.id)
+        except SourceUnavailable as exc:
+            detail = f"odczyt wątku nie powiódł się: {exc}"[:300]
+            await self._publication.set_status(request.id, status=REQUEST_QUEUED, detail=detail)
+            return PublishOutcome(OUTCOME_UNAVAILABLE, detail, request.id)
+        if snapshot.thread.external_id != post_id:
+            return await skipped(
+                f"brak wątku: Reddit zwrócił post {snapshot.thread.external_id}, a zgoda "
+                f"dotyczy {post_id}"
+            )
+        # The community Reddit says the post is in, not the spelling of the address.
+        real = _subreddit_of(payload, fallback=name)
+        community = await self._store.ensure_quiet_community(
+            organization_id=self._organization_id,
+            workspace_id=request.workspace_id,
+            platform=ObservationPlatform.REDDIT.value,
+            community_key=f"r/{real}",
+            display_name=f"Reddit · r/{real}",
+            access_mode=AccessMode.ACCOUNT_REQUIRED.value,
+        )
+        if community is None:
+            return await skipped(f"brak wątku: nie udało się zapisać społeczności r/{real}")
+        thread = snapshot.thread.model_copy(update={"community_key": community.community_key})
+        thread_id, _ = await self._store.record_thread(community=community, thread=thread)
+        _LOG.info(
+            "pilot.publish: wątek %s w %s zapisany z odczytu przy publikacji (wniosek %s)",
+            post_id,
+            community.community_key,
+            request.id,
+        )
+        return (
+            PublishTarget(
+                community_id=community.id,
+                thread_id=thread_id,
+                thread_external_id=post_id,
+                thread_url=thread.url,
+            ),
+            community,
+            payload,
         )
 
     async def _publish_x(
@@ -897,7 +1087,18 @@ class PublishHandlers:
                 )
                 await self._block_everything(request, run.id if run else None, detail, now)
                 return PublishOutcome(OUTCOME_BLOCKED, detail, request.id)
-            detail = f"brak sesji X konta @{account}: {state.error or 'nie odczytano'}"[:300]
+            if state_verdict(state) is SessionVerdict.LOGGED_OUT:
+                detail = f"brak sesji X konta @{account}: {state.error or 'nie odczytano'}"
+            else:
+                # The look established nothing (a timeout, a capsule that did not answer, an
+                # account link that did not show up): the request waits exactly as it does for a
+                # wall, but the sentence must not claim a lost session. A person reading
+                # "brak sesji" goes to sign in again; this one is for a retry (13.10.2026).
+                detail = (
+                    f"nie udało się sprawdzić sesji X konta @{account} (to nie jest wylogowanie): "
+                    f"{state.error or 'nie odczytano'}; wniosek czeka na kolejną próbę"
+                )
+            detail = detail[:300]
             await self._publication.set_status(request.id, status=REQUEST_QUEUED, detail=detail)
             return PublishOutcome(OUTCOME_UNAVAILABLE, detail, request.id)
 
@@ -940,6 +1141,9 @@ class PublishHandlers:
             why = page.unavailable or "nie ma go na stronie"
             detail = f"post X {status_id} jest niedostępny ({why})"
             await self._publication.set_status(request.id, status=REQUEST_SKIPPED, detail=detail)
+            if page.unavailable in ("deleted", "not_found"):
+                # v11: the other drafts waiting under this post expire
+                await self._publication.note_target_gone(request)
             return PublishOutcome(OUTCOME_SKIPPED, detail, request.id)
         ours_below = [one for one in page.by_author(account) if one.relation == "reply"]
         if ours_below or await self._publication.published_on_thread(
@@ -948,6 +1152,12 @@ class PublishHandlers:
             detail = "pod tym postem X jest już nasza odpowiedź; nowa reakcja = nowa zgoda"
             await self._publication.set_status(request.id, status=REQUEST_SKIPPED, detail=detail)
             return PublishOutcome(OUTCOME_SKIPPED, detail, request.id)
+        stale = stale_detail(
+            request, on_x=True, created_at=x_created_at(focal.published_at, status_id), now=now
+        )
+        if stale is not None:  # a scheduled reply under a post that has gone cold (send_checks.py)
+            await self._publication.set_status(request.id, status=REQUEST_SKIPPED, detail=stale)
+            return PublishOutcome(OUTCOME_SKIPPED, stale, request.id)
         assert self._x_port_factory is not None
         return await self._write_it(
             request,

@@ -25,6 +25,8 @@ If no change deserves a post, say so. Waiting is a valid outcome.
   `guidance.read` topic `x-posts`. For both: `guidance.read` topic `channel-strategy`.
 - Voice and memory: `person.voice` (person from `accounts.list`), `memory.list` once per `kind` (PREFERENCE,
   EXPERIENCE) with `community`, `documents.read` for what works. Apply earlier corrections and say what you did differently.
+- What worked so far: `playbook.read` once before you write (lessons with their `n`, the best past own posts and replies
+  with numbers, the voice rules). With no lessons yet, write from the rules and invent no number.
 
 ## Approach
 1. Choose the change a stranger in that place would care about: a problem solved, a decision with its tradeoff,

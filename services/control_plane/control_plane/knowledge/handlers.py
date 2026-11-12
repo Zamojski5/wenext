@@ -31,8 +31,11 @@ modelu"). Nothing in this path calls a model.
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import UUID
 
 import asyncpg
@@ -42,6 +45,8 @@ from control_plane.domain.models import ClaimedJob
 from control_plane.jobs.dispatcher import Handler
 from control_plane.knowledge.ingest import Ingestor
 from control_plane.knowledge.store import Scope
+
+_LOG = logging.getLogger(__name__)
 
 JOB_REFRESH = "knowledge.rss.refresh"
 JOB_SWEEP = "knowledge.rss.sweep"
@@ -203,6 +208,10 @@ class KnowledgeHandlers:
     refresh_after: timedelta = REFRESH_AFTER
     sweep_interval: timedelta = SWEEP_INTERVAL
     experience_interval: timedelta = EXPERIENCE_INTERVAL
+    #: Builds the readers of one learning sweep (`learning/sources.py`): the X capsule, the public
+    #: mirror and Reddit's reader. `None` switches the learning loop OFF for this handler, which is
+    #: what the tests that only look at experience rows want; the product's wiring always sets it.
+    learning_sources: Callable[[], Any] | None = None
 
     def as_mapping(self) -> dict[str, Handler]:
         return {
@@ -320,6 +329,33 @@ class KnowledgeHandlers:
                 # Never in place. The older measurement stays and points at the newer one.
                 await store.correct(existing.id, item, scope)
             written += 1
+
+        # THE LEARNING LOOP RIDES THIS SWEEP (`learning/service.py`): the same hourly chain that
+        # writes what came of each publication also snapshots how each one did over time and turns
+        # the numbers into lessons. Whatever happens there never stops the chain below.
+        if self.learning_sources is not None:
+            try:
+                from control_plane.learning.service import run_sweep
+
+                learned = await run_sweep(
+                    self.pool,
+                    organization_id=self.organization_id,
+                    sources=self.learning_sources(),
+                )
+                _LOG.info(
+                    "learning.sweep: zarejestrowano %d, z obserwacji %d, odczytano %d "
+                    "(nieudane %d), obserwujący %d, lekcje: +%d ~%d -%d",
+                    learned.registered,
+                    learned.harvested,
+                    learned.read,
+                    learned.read_failed,
+                    learned.followers,
+                    learned.lessons_written,
+                    learned.lessons_corrected,
+                    learned.lessons_retracted,
+                )
+            except Exception:
+                _LOG.warning("learning.sweep nie powiódł się; łańcuch trwa", exc_info=True)
 
         if self.queue is not None and rows:
             await schedule_experience_sweep(

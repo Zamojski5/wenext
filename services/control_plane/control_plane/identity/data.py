@@ -59,6 +59,10 @@ STATUS_CANCELLED = "CANCELLED"
 #: later by somebody who never thought about deletion, and the first time anybody noticed would
 #: be after it happened.
 PURGE_ORDER: tuple[str, ...] = (
+    # 0040: the learning loop's snapshots hang off its posts, and the posts off requests and
+    # projects, so both go before everything they point at.
+    "learning_snapshots",
+    "learning_posts",
     "knowledge_items",
     "knowledge_sources",
     "session_events",

@@ -450,6 +450,79 @@ class ObservationStore:
             )
         return _community(row) if row else None
 
+    async def ensure_quiet_community(
+        self,
+        *,
+        organization_id: UUID,
+        workspace_id: UUID,
+        platform: str,
+        community_key: str,
+        display_name: str,
+        access_mode: str,
+    ) -> CommunityRow | None:
+        """The community of this key, created QUIET when it does not exist yet.
+
+        THE ONE PLACE a community appears without anybody choosing to observe it: a live
+        conversation the agent read or the founder answered (D-055, and the publisher for a reply
+        whose thread nobody stored). It exists so the thread has somewhere to live, and nothing
+        more:
+
+          * a community that exists is returned AS IT IS, flags untouched. `upsert_community`
+            sets `observe_enabled` to true on conflict, which would start polling a subreddit
+            nobody chose to watch and re-enable one the founder left;
+          * a new one has observation off and thread analysis off: no polling, no judgment per
+            thread, no model call;
+          * the key is matched ignoring case, preferring the exact one, so `r/saas` from an
+            address and `r/SaaS` from Reddit are one community and not two rows.
+
+        `None` only when the insert and the read disagree; the caller refuses rather than guess.
+        """
+        async with self._pool.acquire() as conn:
+            found = await self._community_ignoring_case(
+                conn, organization_id, workspace_id, platform, community_key
+            )
+            if found is not None:
+                return _community(found)
+            await conn.execute(
+                """
+                INSERT INTO communities
+                    (organization_id, workspace_id, platform, community_key, display_name,
+                     access_mode, observe_enabled, poll_interval_seconds,
+                     thread_analysis_enabled)
+                VALUES ($1, $2, $3, $4, $5, $6, false, 600, false)
+                ON CONFLICT (organization_id, workspace_id, platform, community_key) DO NOTHING
+                """,
+                organization_id,
+                workspace_id,
+                platform,
+                community_key,
+                display_name,
+                access_mode,
+            )
+            found = await self._community_ignoring_case(
+                conn, organization_id, workspace_id, platform, community_key
+            )
+        return _community(found) if found else None
+
+    @staticmethod
+    async def _community_ignoring_case(
+        conn: asyncpg.Connection,
+        organization_id: UUID,
+        workspace_id: UUID,
+        platform: str,
+        community_key: str,
+    ) -> asyncpg.Record | None:
+        return await conn.fetchrow(
+            f"SELECT {_COMMUNITY_COLUMNS} FROM communities "
+            "WHERE organization_id = $1 AND workspace_id = $2 AND platform = $3 "
+            "AND lower(community_key) = lower($4) "
+            "ORDER BY (community_key = $4) DESC, created_at LIMIT 1",
+            organization_id,
+            workspace_id,
+            platform,
+            community_key,
+        )
+
     async def set_observing(
         self, *, organization_id: UUID, workspace_id: UUID, community_id: UUID, enabled: bool
     ) -> CommunityRow:

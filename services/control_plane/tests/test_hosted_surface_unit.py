@@ -66,7 +66,7 @@ def test_the_hosted_allowlist_is_the_first_users_loop_and_nothing_that_touches_a
     assert {
         "catalog.list", "catalog.describe", "project.read", "project.update",
         "opportunities.list", "opportunities.mark", "reddit.search", "draft.create",
-        "draft.mark_posted", "drafts.read", "room.show",
+        "draft.mark_posted", "drafts.read", "room.show", "playbook.read",
         "memory.search", "memory.write", "memory.list", "memory.correct", "memory.retract",
     } == HOSTED_TOOLS  # fmt: skip
     for name in sorted(ALL_NAMES - HOSTED_TOOLS):
@@ -187,6 +187,7 @@ def test_the_instructions_carry_the_first_users_loop_in_order() -> None:
         "last 48 hours",
         "3 to 6 people",
         "opportunities.mark",
+        "playbook.read once",
         "draft.create",
         "at most 2 short paragraphs",
         "at most once, as its builder",
@@ -206,7 +207,9 @@ def test_the_instructions_never_let_the_agent_claim_a_post_and_say_x_is_off() ->
 
 def test_the_instructions_are_short_and_have_none_of_the_banned_style() -> None:
     text = HOSTED_INSTRUCTIONS
-    assert len(text) < 2600 and len(text.split()) < 420, "short"
+    # 13.10: playbook.read and the founder's voice rules (`learning/voice.py`) joined the text, so
+    # the bound moved from 2600 characters and 420 words. Still one screen, still no coaching.
+    assert len(text) < 4200 and len(text.split()) < 700, "short"
     assert not LONG_DASHES.search(text) and not POLISH_LETTERS.search(text)
     assert "!" not in text, "no coaching exclamations"
     lowered = text.lower()
@@ -221,7 +224,7 @@ def test_the_hosted_tools_the_instructions_name_exist_and_are_allowed() -> None:
     named = set(re.findall(r"\b((?:[a-z]+)\.(?:[a-z_]+))\b", HOSTED_INSTRUCTIONS)) & ALL_NAMES
     assert named == {
         "project.update", "reddit.search", "opportunities.mark", "draft.create", "room.show",
-        "draft.mark_posted",
+        "draft.mark_posted", "playbook.read",
     }  # fmt: skip
     assert named <= HOSTED_TOOLS
 

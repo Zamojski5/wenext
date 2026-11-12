@@ -307,3 +307,27 @@ async def test_a_project_of_another_organization_is_not_found(
         json={"workspace_id": str(tenant["workspace"]), "project_id": str(uuid4())},
     )
     assert response.status_code == 404
+
+
+async def test_the_session_read_says_its_verdict_and_a_timeout_is_not_a_logout(
+    pool, tenant, logged_in_client, monkeypatch
+) -> None:
+    """13.10.2026: `logged_in: false` is also what a timeout looks like. The verdict travels next
+    to it, so the dashboard can tell the one case that means "sign in" from the one that means
+    "ask again"."""
+    slow = DumbProbe([_state(False, None, "czytnik kapsuły nie odpowiedział w czasie")])
+    _wire(monkeypatch, slow, DumbCapsule())
+    unknown = (await logged_in_client.get("/api/x/session")).json()
+    assert unknown["logged_in"] is False and unknown["verdict"] == "UNKNOWN"
+    assert "to nie jest wylogowanie" in unknown["message"]
+    assert "nie odpowiedział w czasie" in unknown["message"]
+
+    wall = DumbProbe([_state(False, None, "ekran logowania", login_wall=True)])
+    _wire(monkeypatch, wall, DumbCapsule())
+    lost = (await logged_in_client.get("/api/x/session")).json()
+    assert lost["verdict"] == "LOGGED_OUT" and lost["message"] == "ekran logowania"
+
+    seen = DumbProbe([_state(True, HANDLE)])
+    _wire(monkeypatch, seen, DumbCapsule())
+    ok = (await logged_in_client.get("/api/x/session")).json()
+    assert ok["verdict"] == "LOGGED_IN" and ok["message"] == f"Zalogowano jako @{HANDLE}."

@@ -34,6 +34,7 @@ from typing import Any
 from uuid import UUID
 
 import asyncpg
+from community_os_contracts.session_verdict import SessionVerdict
 
 from control_plane.observe.text_rules import clean_text, count_long_dashes
 from control_plane.pilot.publication import (
@@ -51,6 +52,10 @@ from control_plane.workspace.account_state import note_capsule_login
 from control_plane.workspace.platforms import support_for
 
 from .capability import CapabilityExpired, SessionCapability
+from .card_actions import CardActionTools
+from .card_batch import CardBatchTools
+from .card_connect import CardConnectTools
+from .card_pictures import CardPictureTools
 from .card_send import CardSendTools, SendTokens
 from .cards import (
     ACCOUNT_CONNECTED,
@@ -89,6 +94,7 @@ from .catalog import (
 from .growth_tools import GrowthTools
 from .knowledge_tools import KnowledgeTools
 from .opportunity_tools import OpportunityTools, hosted_view
+from .playbook_tools import PlaybookTools
 from .x_tools import XTools
 
 #: The largest image an own X post may carry: `browser_supervisor.x_writer.MAX_IMAGE_BYTES`, the
@@ -217,7 +223,18 @@ def failed(reason: str, **payload: Any) -> dict[str, Any]:
 
 
 @dataclass
-class ToolRegistry(KnowledgeTools, GrowthTools, XTools, OpportunityTools, CardSendTools):
+class ToolRegistry(
+    KnowledgeTools,
+    GrowthTools,
+    XTools,
+    OpportunityTools,
+    PlaybookTools,
+    CardSendTools,
+    CardActionTools,
+    CardConnectTools,
+    CardBatchTools,
+    CardPictureTools,
+):
     """The implementations, bound to one capability and one connection pool.
 
     `KnowledgeTools` (P3 etap B) carries the five `sources.*` and `memory.*` handlers registered
@@ -232,6 +249,9 @@ class ToolRegistry(KnowledgeTools, GrowthTools, XTools, OpportunityTools, CardSe
     #: jedną turę, więc to jest pamięć na turę, a nie bufor z terminem ważności: model, który
     #: zawoła `accounts.status` trzy razy, nie ma wygenerować trzech odczytów `/api/me.json`.
     _capsule_reading: Any = None
+    #: When that reading was made (`time.monotonic()`), so a LOST session is asked again soon
+    #: instead of being believed for the whole life of the tool server (v10, 12.10).
+    _capsule_reading_at: float | None = None
     #: The one-time confirmations of the card's "Wyślij" (`card_send`). Per registry, so per tool
     #: server, so per host session: a confirmation minted in one process is nothing in another.
     _send_tokens: SendTokens = field(default_factory=SendTokens)
@@ -303,6 +323,14 @@ class ToolRegistry(KnowledgeTools, GrowthTools, XTools, OpportunityTools, CardSe
         permanent one. The same holds for a REFUSAL (`NIEDOSTEPNE`, `BLAD`): nothing was written.
         27.09: a publication refused by the hourly limit was returned as "already done" when the
         agent tried again after the limit freed, and the post waited for another session.
+
+        A call is paired with ITS OWN result and no other (12.10). Pairing it with any later
+        result of the same tool let a call whose own result had failed borrow the success of a
+        DIFFERENT call (same tool, other arguments): six `draft.create` calls failed on a missing
+        migration, were repeated after it, and every call after the first came back as "already
+        done" with the first one's result while no draft was written. The pair is matched by the
+        `call_id` both rows carry; rows without one (older traces) by adjacency, the result being
+        the next call or result row after the call.
         """
         digest = _digest(name, args)
         async with self.pool.acquire() as conn:
@@ -313,9 +341,21 @@ class ToolRegistry(KnowledgeTools, GrowthTools, XTools, OpportunityTools, CardSe
                   JOIN session_events result
                     ON result.session_id = call.session_id AND result.seq > call.seq
                    AND result.kind = $4
+                   AND result.payload->>'tool' = call.payload->>'tool'
+                   AND (
+                       -- ITS OWN result: the id both rows of one call carry ...
+                       (call.payload->>'call_id' IS NOT NULL
+                        AND result.payload->>'call_id' = call.payload->>'call_id')
+                       -- ... or, for a row written before the id existed, the very next call or
+                       -- result row of the session (the writers append the pair back to back)
+                       OR (call.payload->>'call_id' IS NULL
+                           AND result.seq = (
+                               SELECT min(n.seq) FROM session_events n
+                                WHERE n.session_id = call.session_id AND n.seq > call.seq
+                                  AND n.kind IN ($3, $4)))
+                   )
                  WHERE call.session_id = $1 AND call.kind = $3
                    AND call.payload->>'args_sha256' = $2
-                   AND result.payload->>'tool' = call.payload->>'tool'
                    AND coalesce(result.payload->>'status', '') <> 'failed'
                    AND coalesce(result.payload->>'outcome', '') <> ALL($5::text[])
                  ORDER BY call.seq, result.seq
@@ -562,13 +602,19 @@ class ToolRegistry(KnowledgeTools, GrowthTools, XTools, OpportunityTools, CardSe
         Nie podnosi wyjątków: `read_session` zwraca odczyt z powodem, gdy kapsuła milczy, a karta
         ma wtedy powiedzieć „nie mogę sprawdzić", zamiast udawać którykolwiek stan.
         """
+        import time
+
         from control_plane.observe.capsule_session import probe_from_env, read_session
 
-        if self._capsule_reading is not None:
-            return self._capsule_reading
+        reading = self._capsule_reading
+        if reading is not None:
+            age = time.monotonic() - self._capsule_reading_at if self._capsule_reading_at else 0.0
+            if age < (600.0 if getattr(reading, "logged_in", False) else 20.0):
+                return reading
         probe = probe_from_env()
         try:
             self._capsule_reading = await read_session(probe)
+            self._capsule_reading_at = time.monotonic()
             return self._capsule_reading
         finally:
             close = getattr(probe, "aclose", None)
@@ -653,8 +699,8 @@ class ToolRegistry(KnowledgeTools, GrowthTools, XTools, OpportunityTools, CardSe
         if source is None:
             return None
         try:
-            if self._x_identity_cache is None:
-                self._x_identity_cache = await source.verify_identity(x_accounts[0]["konto"])
+            if not self._x_identity_usable():
+                self._x_identity_noted(await source.verify_identity(x_accounts[0]["konto"]))
         finally:
             await source.aclose()
         state = self._x_identity_cache
@@ -695,7 +741,12 @@ class ToolRegistry(KnowledgeTools, GrowthTools, XTools, OpportunityTools, CardSe
             if state is not None
             else "nie udało się sprawdzić sesji X w przeglądarce agenta"
         )
-        return self._x_connect_card(handle, why=why)
+        # A login wall (or somebody else's session) is a card that sends the person to sign in. A
+        # look that established nothing is not: it gets the card that only offers to check again.
+        from community_observer.x_browser import state_verdict
+
+        unknown = state is None or state_verdict(state) is SessionVerdict.UNKNOWN
+        return self._x_connect_card(handle, why=why, unknown=unknown)
 
     def _no_account_card(self) -> dict[str, Any]:
         """Karta KONTO dla projektu, który nie ma przypisanego ŻADNEGO konta.
@@ -783,9 +834,13 @@ class ToolRegistry(KnowledgeTools, GrowthTools, XTools, OpportunityTools, CardSe
         CZEGO TO NARZĘDZIE NIE ROBI I DLACZEGO. Nie otwiera samo ekranu kapsuły. Otwarcie wydaje
         bilet CONTROL, czyli prawo do sterowania przeglądarką, w której leży konto człowieka, a
         bilet jest wystawiany KONKRETNEJ osobie. Sesja agenta nie jest osobą i nie ma w swoim
-        zakresie tożsamości operatora, więc wystawienie biletu „w czyimś imieniu” byłoby
-        wymyśleniem tej tożsamości. Kliknięcie na karcie robi to samo wywołanie co ekran, tylko
-        pod tożsamością człowieka, który je kliknął.
+        zakresie tożsamości operatora, więc to wywołanie, które widzi model, nigdy go nie wystawia.
+        Kliknięcie na karcie robi to samo wywołanie co ekran, tylko pod tożsamością człowieka,
+        który je kliknął. Od v10 w Codexie jest też karta, która robi to w rozmowie
+        (`room.connect_token`, `room.connect_account`, `tools/card_connect.py`): narzędzia tylko
+        dla karty, za jednorazowym potwierdzeniem z kliknięcia, z biletem na jedynego operatora
+        organizacji (D-016, tak jak podpis `card_consent`) i z adresem okna tylko w `_meta`.
+        Wyjątek jest więc ściśle ograniczony do kliknięcia i niewidoczny dla modelu.
 
         Konto już gotowe nie wymaga niczego i narzędzie mówi to wprost zamiast otwierać logowanie
         drugi raz.
@@ -2012,14 +2067,27 @@ class ToolRegistry(KnowledgeTools, GrowthTools, XTools, OpportunityTools, CardSe
         rather than silently glued to the text: the person approves what readers will see.
         """
         from community_observer.x_browser import canonical_handle, parse_status_url
+        from community_os_contracts.x_text import X_MAX_WEIGHT, x_length_problem
 
-        from .x_tools import X_MAX_WEIGHT, x_text_weight
-
-        weight = x_text_weight(text)
-        if weight > X_MAX_WEIGHT:
+        # THE ACTUATOR'S OWN RULE, not a copy of it (11.10.2026): `x_length_problem` is the function
+        # `browser_supervisor.x_writer.check_text` asks, so a text it would refuse is refused HERE,
+        # with its number, before a consent is spent on it. The previous counter here saw only
+        # `https://` links and let a 275-character post ending in `getwenext.com` through; the
+        # actuator counted the bare domain as 23 and refused it as 285 of 280.
+        problem = x_length_problem(text)
+        if problem is not None:
+            measure, number = problem
             return unavailable(
-                f"tekst ma {weight} znaków w rachunku X, limit to {X_MAX_WEIGHT}",
-                wskazowka="Skróć treść; adres liczy się jako 23 znaki.",
+                (
+                    f"tekst ma {number} znaków, a limit X to {X_MAX_WEIGHT}"
+                    if measure == "plain"
+                    else f"tekst ma {number} znaków w rachunku X, limit to {X_MAX_WEIGHT}"
+                ),
+                wskazowka=(
+                    "Skróć treść. X liczy każdy adres jako 23 znaki, także sam adres strony "
+                    "bez https:// (np. getwenext.com), a znak spoza łaciny (np. emoji, "
+                    "chiński) jako 2."
+                ),
             )
         if kind == KIND_OWN_POST:
             if title:
@@ -2290,6 +2358,17 @@ class ToolRegistry(KnowledgeTools, GrowthTools, XTools, OpportunityTools, CardSe
             )
         except Exception as exc:  # the approval path has its own refusals; report, never publish
             return failed(f"nie udało się zapisać propozycji: {type(exc).__name__}: {exc}")
+        # v11: the post this reply answers is read once and kept with its conversation, so the card
+        # shows it above the reply. The draft exists already: a failure here changes nothing.
+        await self._record_reply_target(
+            kind=kind,
+            platform=str(row["platform"]),
+            target_external_id=target_external_id,
+            target_url=target_url,
+        )
+        # v11: an own post on X that ends with the address of a post is a QUOTE: that post is read
+        # once for context so the card can draw it under our words (best effort, like the above).
+        await self._record_quote_context(kind=kind, platform=str(row["platform"]), text=text)
         return pending(
             "propozycja czeka na zgodę człowieka albo podpisaną politykę; nic nie zostało "
             "opublikowane",

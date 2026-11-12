@@ -39,11 +39,11 @@ pytestmark = pytest.mark.db
 
 OPPORTUNITY_KEYS = {
     "id", "platforma", "spolecznosc", "tytul", "fragment", "autor", "url", "utworzono", "wynik",
-    "komentarze", "dlaczego", "kat", "stan", "szkic",
+    "komentarze", "dlaczego", "kat", "stan", "szkic", "cel",
 }  # fmt: skip
 DRAFT_KEYS = {
     "revision_id", "okazja_id", "platforma", "konto", "spolecznosc", "rodzaj", "tytul", "tekst",
-    "w_odpowiedzi_na", "stan", "wygasa", "odcisk",
+    "w_odpowiedzi_na", "stan", "wygasa", "odcisk", "cel", "cytat", "konto_awatar",
 }  # fmt: skip
 RESULT_KEYS = {
     "url", "okazja_id", "platforma", "tekst", "widocznosc", "glosy", "odpowiedzi", "opublikowano",
@@ -847,7 +847,9 @@ async def test_the_room_has_exactly_the_contract_keys_and_nothing_else(
 
     kinds = {one["rodzaj"]: one for one in room["szkice"]}
     assert set(kinds) == {"REPLY", "OWN_POST"}
-    assert room["szkice"][0]["rodzaj"] == "OWN_POST", "najnowszy szkic pierwszy"
+    # THE BEST IS FIRST (v11, `opportunities/ranking.py`): a reply under a fresh thread goes before an own
+    # post, which has no thread to be fresh; the newest-first order stays only among equals.
+    assert room["szkice"][0]["rodzaj"] == "REPLY"
     assert kinds["OWN_POST"]["w_odpowiedzi_na"] is None
     assert kinds["OWN_POST"]["platforma"] == "X" and kinds["OWN_POST"]["spolecznosc"] == "X"
     assert kinds["OWN_POST"]["tekst"] == "Zbudowałem to w weekend."

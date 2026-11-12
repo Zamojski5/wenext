@@ -19,6 +19,7 @@ o dwa pakiety. Liczba tutaj ma być przepisana z outputu, nie z pamięci.
 | `codex.py` | `ThreadSecurityBinding`, `CodexRunThread`, resume fail-closed | 13.3-13.4 (L2191-2266) |
 | `transitions.py` | **F1.** Sześć tabel przejść + `require_transition` | 14.8 (L2582-2606), 16.1 (L2773-2775) |
 | `jobs.py` | **F1.** `JobFencingToken`, `StaleJobFencingToken`, `JobTransportPort` | L5202, L5206, L5208, L5211, L5216 |
+| `x_text.py` | Długość posta liczona jak X (adres 23, znak spoza łaciny 2, limit 280), jedna definicja dla szkicu (`draft.create`) i dla aktuatora X; 11.10.2026 dwie kopie rozjechały się o gołą domenę (bez https://) | brak w dokumencie: usterka z użycia |
 
 Liczność tabel przejść (stan / liczba par), sprawdzana testem:
 `SocialAccount` 6/5, `BrowserProfile` 6/9, `BrowserSession` 6/9, `HumanTakeover` 7/12,

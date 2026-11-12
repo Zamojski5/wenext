@@ -21,6 +21,7 @@ spent, are things only the click can learn; the page must show those refusals as
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
@@ -28,11 +29,17 @@ from uuid import UUID
 import asyncpg
 
 from control_plane.pilot.publication import split_media, split_own_post
+from control_plane.pilot.send_checks import x_created_at
 from control_plane.presence.approval import ACTION_OF_CAPABILITY, ACTION_OWN_POST
 
+from .freshness import SYSTEM_PREFIX, find_stale
+from .ranking import rank_score
+from .snapshot import trailing_status
 from .store import (
+    CONTEXT_DISMISSER,
     OPEN_STATUSES,
     STATUS_ANSWERED,
+    STATUS_DISMISSED,
     OpportunityStore,
     OpportunityView,
     room_path,
@@ -45,6 +52,13 @@ RESULTS_WINDOW_DAYS = 7
 MAX_OPPORTUNITIES = 50
 MAX_DRAFTS = 50
 MAX_RESULT_ROWS = 100
+#: How many skipped conversations the card lists (newest decision first); the total is told apart.
+MAX_SKIPPED = 20
+#: HOW MANY PAGES THE CARD HAS, AT MOST (v11, 13.10: "1 of 8", not "3 of 47"). The best drafts first
+#: (`ranking.py` times how well the account fits), then, when there are fewer than this, the best of
+#: the opportunities nobody has drafted for. Everything behind them is NOT shown and is counted in
+#: `ukryte`; nothing is deleted, and a draft that was behind comes up as soon as there is room.
+MAX_PAGES = 8
 
 #: The only state of a draft on this page. Every row is a revision that waits for a human click;
 #: the field exists so the page does not have to know that.
@@ -66,6 +80,15 @@ def _moment(value: datetime | None) -> str | None:
 
 def _platform_of_target(target_external_id: str, fallback: str) -> str:
     return "X" if target_external_id.startswith("x:") else fallback
+
+
+def opportunity_rank(one: OpportunityView, now: datetime) -> float:
+    """The order of the card for one opportunity (`opportunities/ranking.py`): younger and
+    faster-growing first. X posts without a read time are dated by their id."""
+    created = one.created_at_source
+    if created is None and one.external_id.startswith("x:"):
+        created = x_created_at(None, one.external_id.removeprefix("x:"))
+    return rank_score(one.platform, created, one.metrics, now)
 
 
 def draft_json(
@@ -132,6 +155,15 @@ def draft_json(
         "stan": DRAFT_WAITING,
         "wygasa": _moment(row["expires_at"]),
         "odcisk": row.get("payload_hash"),
+        # v11: the post this reply answers (author, avatar, text, age, counters, Trending), from the
+        # conversation's opportunity; `None` for an own post and for a target nobody has read yet.
+        "cel": opportunity.target_json() if opportunity is not None and not own else None,
+        # v11: an own post on X that ENDS with the address of a post is a quote (X draws our words
+        # and the post as a box). `cytat` is that post, read for context (`note_context`); the card
+        # takes the address off the end of the text it shows and draws the box instead.
+        "cytat": None,
+        # The founder's own picture for the account, filled by the tool that serves the card.
+        "konto_awatar": None,
     }
 
 
@@ -155,9 +187,53 @@ def totals(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def quote_json(
+    url: str, handle: str, opportunity: OpportunityView | None, now: datetime
+) -> dict[str, Any]:
+    """The post a draft quotes, in the shape of `cel` plus its address. A quote whose post was never
+    read still has its address and handle (from the address itself), and nothing else."""
+    if opportunity is not None:
+        shown = opportunity.target_json(now)
+        return {**shown, "url": url, "autor": shown["autor"] or handle}
+    return {
+        "url": url,
+        "autor": handle,
+        "nazwa": None,
+        "awatar": None,
+        "tekst": None,
+        "utworzono": None,
+        "metryki": {
+            "wyswietlenia": None,
+            "polubienia": None,
+            "odpowiedzi": None,
+            "udostepnienia": None,
+        },
+        "pomiar": None,
+        "trending": False,
+        "zniknal": False,
+        "zweryfikowany": None,
+        "media": None,
+    }
+
+
 async def _drafts(
-    pool: asyncpg.Pool, *, organization_id: UUID, workspace_id: UUID, project_id: UUID
-) -> list[dict[str, Any]]:
+    pool: asyncpg.Pool,
+    *,
+    organization_id: UUID,
+    workspace_id: UUID,
+    project_id: UUID,
+    exclude: frozenset[UUID] = frozenset(),
+    now: datetime | None = None,
+    fit: Mapping[str, float] | None = None,
+) -> list[tuple[float, dict[str, Any]]]:
+    """The waiting drafts as `(score, draft)`, best first. `exclude` are the stale ones
+    (`freshness.py`): they are not on the page, and not counted against `MAX_DRAFTS`.
+
+    The score is `ranking.py`'s (how fresh the post is and how fast it is growing) TIMES HOW WELL
+    THE ACCOUNT FITS (`fit`, keyed `PLATFORM:login` in lower case, 1.0 when absent): a draft the
+    founder cannot send right now (the account is outside the signed scope, or its session is lost)
+    ranks behind one he can, so the eight on the card are the eight he can act on."""
+    moment = now or datetime.now(UTC)
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
@@ -174,6 +250,7 @@ async def _drafts(
              WHERE r.organization_id = $1 AND r.workspace_id = $2
                AND r.payload ->> 'plan_version' = $3::text
                AND r.state = 'READY_FOR_APPROVAL' AND r.expires_at > now()
+               AND r.id <> ALL($5::uuid[])
                -- Posted by hand and said so (`draft.mark_posted`): no longer waiting for anyone.
                AND NOT EXISTS (
                    SELECT 1 FROM manual_publications m
@@ -186,6 +263,7 @@ async def _drafts(
             workspace_id,
             project_id,
             MAX_DRAFTS,
+            list(exclude),
         )
         targets = sorted(
             {str(_payload(r["payload"]).get("target_external_id") or "") for r in rows}
@@ -204,19 +282,50 @@ async def _drafts(
             targets,
         )
     thread_of = {f"t3_{t['external_id']}": t for t in threads}
+    # The posts that own posts QUOTE are read from the same table as the replies' targets.
+    quotes: dict[str, tuple[str, str, str]] = {}
+    for row in rows:
+        shown_text, _media = split_media(str(_payload(row["payload"]).get("text_and_media") or ""))
+        found = trailing_status(shown_text) if str(row["platform"]) == "X" else None
+        own_post = (
+            ACTION_OF_CAPABILITY.get(str(_payload(row["payload"]).get("action_type")))
+            == ACTION_OWN_POST
+        )
+        if found is not None and own_post:
+            quotes[str(row["revision_id"])] = found
     opportunities = await OpportunityStore(pool).by_external_ids(
         organization_id=organization_id,
         project_id=project_id,
-        external_ids=[target for target in targets if target],
+        external_ids=[
+            *(target for target in targets if target),
+            *(f"x:{found[2]}" for found in quotes.values()),
+        ],
     )
-    return [
-        draft_json(
-            row,
-            opportunity=opportunities.get(str(_payload(row["payload"]).get("target_external_id"))),
-            thread=thread_of.get(str(_payload(row["payload"]).get("target_external_id"))),
-        )
-        for row in rows
-    ]
+    scored: list[tuple[float, dict[str, Any]]] = []
+    for row in rows:
+        target = str(_payload(row["payload"]).get("target_external_id"))
+        opportunity = opportunities.get(target)
+        thread = thread_of.get(target)
+        shown = draft_json(row, opportunity=opportunity, thread=thread)
+        quoted = quotes.get(str(row["revision_id"]))
+        if quoted is not None:
+            shown["cytat"] = quote_json(
+                quoted[0], quoted[1], opportunities.get(f"x:{quoted[2]}"), moment
+            )
+        if opportunity is not None:
+            score = opportunity_rank(opportunity, moment)
+        elif shown["rodzaj"] == KIND_REPLY:
+            created = None
+            if target.startswith("x:"):
+                created = x_created_at(None, target.removeprefix("x:"))
+            score = rank_score(shown["platforma"], created, None, moment)
+        else:
+            score = 0.0  # an own post has no thread to be fresh: after the replies
+        score *= (fit or {}).get(f"{shown['platforma']}:{shown['konto'] or ''}".lower(), 1.0)
+        scored.append((score, shown))
+    # Stable: among equals the newest draft stays first (the query's own order).
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    return scored
 
 
 async def _results(
@@ -333,24 +442,73 @@ async def room_view(
     workspace_id: UUID,
     project_id: UUID,
     now: datetime | None = None,
+    fit: Mapping[str, float] | None = None,
+    max_pages: int | None = None,
 ) -> dict[str, Any]:
-    """The whole payload of `GET .../room`. The caller has already checked the project."""
+    """The whole payload of `GET .../room`. The caller has already checked the project.
+
+    The CARD asks for AT MOST `max_pages` PAGES (`MAX_PAGES`, v11): the best drafts first, ranked
+    by freshness, how fast the post is growing and how well the account fits (`fit`); with room
+    left, the best opportunities nobody drafted for; answered ones only in what is left after
+    those. What is behind is not on the page and is counted: `ukryte` is how many drafts and new
+    conversations were left out, and nothing is deleted. Without `max_pages` (the dashboard's
+    Pokój, which lists everything) the payload is what it always was, with no `ukryte`."""
     moment = now or datetime.now(UTC)
     scanned = await OpportunityStore(pool).scan(
         organization_id=organization_id, project_id=project_id
     )
+    # STALE DRAFTS ARE NOT ON THE PAGE (`freshness.py`): a reply whose post went cold, and the
+    # opportunity that stands on that draft, disappear at once, with no write (this is a read);
+    # the publisher's tick expires them for good, and "Skipped" lists the reason either way.
+    stale = frozenset(
+        one.revision_id
+        for one in await find_stale(
+            pool, organization_id=organization_id, project_id=project_id, now=moment
+        )
+    )
     # Skipped opportunities leave the page; answered ones stay (after the open ones) so the
     # founder sees what already got a reply, and the results block carries the numbers.
-    visible = [one for one in scanned if one.stan in (*OPEN_STATUSES, STATUS_ANSWERED)]
-    visible.sort(key=lambda one: one.stan == STATUS_ANSWERED)  # stable: freshness is kept
+    visible = [
+        one
+        for one in scanned
+        if one.stan in (*OPEN_STATUSES, STATUS_ANSWERED) and one.draft_revision_id not in stale
+    ]
+    # THE BEST OPPORTUNITY IS PAGE 1 (`ranking.py`): freshness, then how fast it is growing; the
+    # card keeps this order within a rank. Answered ones stay last.
+    visible.sort(key=lambda one: (one.stan == STATUS_ANSWERED, -opportunity_rank(one, moment)))
+    ranked = await _drafts(
+        pool,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        project_id=project_id,
+        exclude=stale,
+        now=moment,
+        fit=fit,
+    )
+    extra: dict[str, Any] = {}
+    if max_pages is None:
+        drafts = [shown for _score, shown in ranked]
+        opportunities = visible[:MAX_OPPORTUNITIES]
+    else:
+        kept, behind = ranked[:max_pages], ranked[max_pages:]
+        drafts = [shown for _score, shown in kept]
+        with_draft = {shown["okazja_id"] for shown in drafts if shown["okazja_id"]}
+        behind_draft = {shown["okazja_id"] for _score, shown in behind if shown["okazja_id"]}
+        # The rest of the page: opportunities that have no draft among the best, in the order above.
+        others = [
+            one
+            for one in visible
+            if str(one.id) not in with_draft and str(one.id) not in behind_draft
+        ]
+        room_left = max(0, max_pages - len(drafts))
+        shown_ids = {str(one.id) for one in others[:room_left]} | with_draft
+        behind_new = sum(1 for one in others[room_left:] if one.stan != STATUS_ANSWERED)
+        opportunities = [one for one in visible if str(one.id) in shown_ids][:MAX_OPPORTUNITIES]
+        extra["ukryte"] = len(behind) + behind_new
     return {
-        "okazje": [one.to_json() for one in visible[:MAX_OPPORTUNITIES]],
-        "szkice": await _drafts(
-            pool,
-            organization_id=organization_id,
-            workspace_id=workspace_id,
-            project_id=project_id,
-        ),
+        "okazje": [one.to_json() for one in opportunities],
+        "szkice": drafts,
+        **extra,
         "wyniki": await _results(
             pool,
             organization_id=organization_id,
@@ -360,3 +518,51 @@ async def room_view(
         ),
         "pokoj": room_path(workspace_id, project_id),
     }
+
+
+def skipped_json(one: OpportunityView) -> dict[str, Any]:
+    """One skipped conversation as the card lists it (`pominiete` of `room.show`). Pure.
+
+    `przez` says who decided: the agent (`session:` author) gives a reason, a person who pressed
+    "pomin" on the page gave none, so `powod` is null and the card says so instead of guessing.
+    """
+    author = str(one.dismissed_by or "")
+    by_agent = author.startswith("session:")
+    by_system = author.startswith(SYSTEM_PREFIX)
+    return {
+        "id": str(one.id),
+        "platforma": one.platform,
+        "spolecznosc": one.community,
+        "tytul": one.display_title,
+        "url": one.url,
+        "pominieto": _moment(one.dismissed_at),
+        "przez": "system" if by_system else "agent" if by_agent else "czlowiek",
+        "powod": one.reason if by_agent or by_system else None,
+        # v11: the stable code of a skip the SYSTEM made (`ZA_STARY`), so the card words it itself.
+        "powod_kod": author.removeprefix(SYSTEM_PREFIX) if by_system else None,
+    }
+
+
+async def skipped_view(
+    pool: asyncpg.Pool, *, organization_id: UUID, project_id: UUID
+) -> dict[str, Any]:
+    """The conversations the agent (or the person) decided not to answer, for the card's
+    "Skipped (N)". `pominiete_lacznie` counts every one of them in the scan, `pominiete` the
+    newest."""
+    scanned = await OpportunityStore(pool).scan(
+        organization_id=organization_id, project_id=project_id
+    )
+    skipped = [
+        one
+        for one in scanned
+        if one.stan == STATUS_DISMISSED and one.dismissed_by != CONTEXT_DISMISSER
+    ]
+    skipped.sort(key=lambda one: one.dismissed_at or datetime.min.replace(tzinfo=UTC), reverse=True)
+    rows = [skipped_json(one) for one in skipped]
+    # A stale draft is gone from the card the moment it is stale, and the publisher's tick has not
+    # necessarily run yet: its reason is listed now, from the same rows (`freshness.py`), newest
+    # first. Once the tick persists it, the persisted row stands in its place (the draft is no
+    # longer waiting, so it is not listed twice).
+    stale = await find_stale(pool, organization_id=organization_id, project_id=project_id)
+    rows = [one.skipped_json() | {"pominieto": _moment(datetime.now(UTC))} for one in stale] + rows
+    return {"pominiete": rows[:MAX_SKIPPED], "pominiete_lacznie": len(rows)}

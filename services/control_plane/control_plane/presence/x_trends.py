@@ -30,6 +30,7 @@ from typing import Any
 from uuid import UUID
 
 import asyncpg
+from community_os_contracts.session_verdict import SessionVerdict
 
 from control_plane.domain import commands
 from control_plane.domain.models import ClaimedJob
@@ -437,7 +438,7 @@ class XTrendHandlers:
             )
 
     async def collect_once(self, project_id: UUID, now: datetime) -> CollectResult:
-        from community_observer.x_browser import X_ORIGIN, XPlatformRefused
+        from community_observer.x_browser import X_ORIGIN, XPlatformRefused, state_verdict
 
         delegation = await self._presence.live_delegation(
             organization_id=self._organization_id, project_id=project_id
@@ -458,6 +459,14 @@ class XTrendHandlers:
         try:
             identity = await source.verify_identity(handle)
             if not identity.logged_in or (identity.handle or "").lower() != handle.lower():
+                if state_verdict(identity) is SessionVerdict.UNKNOWN:
+                    # The look established nothing (a timeout, a capsule that did not answer):
+                    # skipped for this hour like a lost session, but never SAID to be one.
+                    return CollectResult(
+                        OUTCOME_SKIPPED,
+                        f"nie udało się sprawdzić sesji X konta @{handle}: "
+                        f"{identity.error or 'brak odpowiedzi'}"[:300],
+                    )
                 return CollectResult(
                     OUTCOME_SKIPPED, f"przeglądarka X nie jest zalogowana jako @{handle}"
                 )
